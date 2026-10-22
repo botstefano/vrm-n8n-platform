@@ -1,0 +1,6 @@
+{
+  "name": "VRM Automation Platform",
+  "description": "Vendor Risk Management platform with continuous security automation, CVE monitoring, TLS checking, attack surface mapping, reevaluations, and multi-channel alerts.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
