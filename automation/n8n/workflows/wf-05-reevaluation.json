@@ -1,0 +1,178 @@
+{
+  "name": "WF-05 Re-evaluation Scheduler",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "cron",
+      "name": "Cron 6h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT v.id, v.legal_name, v.criticality, v.current_risk,\n       v.primary_contact->>'email' AS email,\n       CASE WHEN v.criticality >= 4 THEN 90 WHEN v.criticality = 3 THEN 180 ELSE 365 END AS interval_days\nFROM vendors v\nWHERE v.status IN ('approved','conditional','monitoring')\n  AND (v.next_evaluation IS NULL OR v.next_evaluation <= now())\n  AND NOT EXISTS (SELECT 1 FROM assessments a\n                  WHERE a.vendor_id = v.id AND a.status IN ('pending','in_progress'))\nORDER BY v.criticality DESC, v.next_evaluation NULLS FIRST\nLIMIT 50;",
+        "options": {}
+      },
+      "id": "pg-due",
+      "name": "Find Due Vendors",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH a AS (\n  INSERT INTO assessments (vendor_id, questionnaire_id, status, started_at)\n  SELECT $1::uuid, q.id, 'pending', now()\n  FROM questionnaires q WHERE q.is_active = true\n  ORDER BY q.version DESC LIMIT 1\n  RETURNING id, vendor_id\n), v AS (\n  UPDATE vendors\n     SET status = 'reevaluation'::vendor_status,\n         next_evaluation = now() + make_interval(days => $2::int),\n         updated_at = now()\n   WHERE id = $1::uuid AND EXISTS (SELECT 1 FROM a)\n  RETURNING id\n)\nSELECT a.id AS assessment_id, a.vendor_id FROM a JOIN v ON v.id = a.vendor_id;",
+        "options": {
+          "queryReplacement": "={{ [$json.id, $json.interval_days] }}"
+        }
+      },
+      "id": "pg-reeval",
+      "name": "Create Assessment",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        700,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst secret = $env.PORTAL_TOKEN_SECRET;\nif (!secret) throw new Error('PORTAL_TOKEN_SECRET no está definido');\nconst base = String($env.VRM_PORTAL_URL || 'https://vrm.local/portal').replace(/\\/$/, '');\nconst due = $('Find Due Vendors').all().map(i => i.json);\nreturn $input.all().map(it => {\n  const a = it.json;\n  const v = due.find(d => d.id === a.vendor_id) || {};\n  const payload = Buffer.from(JSON.stringify({\n    aid: a.assessment_id, vid: a.vendor_id, exp: Date.now() + 30 * 86400000\n  })).toString('base64url');\n  const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');\n  return { json: {\n    vendor_id: a.vendor_id, assessment_id: a.assessment_id, legal_name: v.legal_name,\n    email: v.email || null, link: base + '/assessment/' + payload + '.' + sig\n  }};\n});"
+      },
+      "id": "link",
+      "name": "Sign Portal Link",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/assessment-created",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Signature",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ vendor_id: $json.vendor_id, assessment_id: $json.assessment_id, email: $json.email, link: $json.link }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "notify",
+      "name": "Notify Backend (envío email)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1180,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Cron 6h": {
+      "main": [
+        [
+          {
+            "node": "Find Due Vendors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Due Vendors": {
+      "main": [
+        [
+          {
+            "node": "Create Assessment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Assessment": {
+      "main": [
+        [
+          {
+            "node": "Sign Portal Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Portal Link": {
+      "main": [
+        [
+          {
+            "node": "Notify Backend (envío email)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Lima"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [
+    {
+      "name": "scheduler"
+    },
+    {
+      "name": "assessments"
+    }
+  ]
+}

@@ -1,0 +1,199 @@
+{
+  "name": "WF-10 Cleanup & Archive",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron",
+      "name": "Daily 03:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH c AS (\n  UPDATE vendor_findings\n     SET status = 'closed'::finding_status, closed_at = now(), resolution = 'auto_closed_stale'\n   WHERE status = 'open' AND due_date < now() - make_interval(days => $1::int)\n  RETURNING id\n) SELECT COUNT(*)::int AS closed_findings FROM c;",
+        "options": {
+          "queryReplacement": "={{ [Number($env.STALE_FINDING_DAYS || 90)] }}"
+        }
+      },
+      "id": "pg-close",
+      "name": "Auto-close Stale",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH moved AS (\n  DELETE FROM audit_log WHERE created_at < now() - make_interval(years => $1::int) RETURNING *\n), ins AS (\n  INSERT INTO audit_log_archive SELECT * FROM moved RETURNING 1\n) SELECT COUNT(*)::int AS archived_audit FROM ins;",
+        "options": {
+          "queryReplacement": "={{ [Number($env.AUDIT_RETENTION_YEARS || 5)] }}"
+        }
+      },
+      "id": "pg-audit",
+      "name": "Archive Old Audit",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        700,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH d AS (\n  DELETE FROM score_history WHERE calculated_at < now() - make_interval(years => $1::int) RETURNING 1\n) SELECT COUNT(*)::int AS purged_scores FROM d;",
+        "options": {
+          "queryReplacement": "={{ [Number($env.SCORE_RETENTION_YEARS || 2)] }}"
+        }
+      },
+      "id": "pg-score",
+      "name": "Purge Old Score History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        940,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  job_type: 'cleanup_archive', interval_min: 1440, status: 'ok',\n  meta: {\n    closed_findings: $('Auto-close Stale').first().json.closed_findings,\n    archived_audit: $('Archive Old Audit').first().json.archived_audit,\n    purged_scores: $('Purge Old Score History').first().json.purged_scores\n  } } }];"
+      },
+      "id": "sum",
+      "name": "Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO monitoring_jobs (vendor_id, job_type, last_run, next_run, status, result_meta)\nVALUES (NULL, $1, $5::timestamptz, now() + make_interval(mins => $2::int), $3, $4::jsonb)\nON CONFLICT (job_type) WHERE vendor_id IS NULL\nDO UPDATE SET last_run = EXCLUDED.last_run, next_run = EXCLUDED.next_run,\n              status = EXCLUDED.status, result_meta = EXCLUDED.result_meta;",
+        "options": {
+          "queryReplacement": "={{ [$json.job_type, $json.interval_min, $json.status, JSON.stringify($json.meta || {}), $json.last_run || new Date().toISOString()] }}"
+        }
+      },
+      "id": "pg-log",
+      "name": "Log Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1420,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Daily 03:00": {
+      "main": [
+        [
+          {
+            "node": "Auto-close Stale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-close Stale": {
+      "main": [
+        [
+          {
+            "node": "Archive Old Audit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive Old Audit": {
+      "main": [
+        [
+          {
+            "node": "Purge Old Score History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Purge Old Score History": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary": {
+      "main": [
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Lima"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [
+    {
+      "name": "cleanup"
+    }
+  ]
+}

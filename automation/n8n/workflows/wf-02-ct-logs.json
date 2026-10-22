@@ -1,0 +1,432 @@
+{
+  "name": "WF-02 CT Logs (crt.sh)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "id": "cron",
+      "name": "Cron 24h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, legal_name, website FROM vendors WHERE status IN ('approved','conditional','monitoring','incident') AND website IS NOT NULL;",
+        "options": {}
+      },
+      "id": "pg-vendors",
+      "name": "Get Vendors",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\nfor (const it of $input.all()) {\n  const v = it.json;\n  try {\n    const u = new URL(/^https?:\\/\\//i.test(v.website) ? v.website : 'https://' + v.website);\n    const domain = u.hostname.replace(/^www\\./i, '').toLowerCase();\n    if (!domain.includes('.')) continue;\n    out.push({ json: { vendor_id: v.id, legal_name: v.legal_name, domain } });\n  } catch (e) { /* URL inválida: se ignora */ }\n}\nreturn out;"
+      },
+      "id": "extract",
+      "name": "Extract Domain",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://crt.sh/",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "=%.{{ $json.domain }}"
+            },
+            {
+              "name": "output",
+              "value": "json"
+            },
+            {
+              "name": "exclude",
+              "value": "expired"
+            },
+            {
+              "name": "deduplicate",
+              "value": "Y"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "crt",
+      "name": "crt.sh Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        940,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 10000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const LOOKBACK_DAYS = Number($env.CT_LOOKBACK_DAYS || 3);\nconst cutoff = Date.now() - LOOKBACK_DAYS * 86400000;\nconst SUSPICIOUS = /(^|\\.)(dev|test|stage|staging|uat|admin|vpn|internal|jenkins|git|gitlab|vault)(\\d*)\\./i;\nconst toTs = s => new Date(/Z$|[+-]\\d\\d:?\\d\\d$/.test(s) ? s : s + 'Z').getTime();\nconst items = $input.all();\nconst out = [];\nlet failed = 0, ok = 0;\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json;\n  const v = $('Extract Domain').itemMatching(i).json;\n  if (!resp || resp.statusCode !== 200 || !Array.isArray(resp.body)) { failed++; continue; }\n  ok++;\n  const seen = new Set();\n  const recent = resp.body.filter(c => c.entry_timestamp && toTs(c.entry_timestamp) >= cutoff)\n                          .filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, 25);\n  for (const c of recent) {\n    const names = [...new Set(String(c.name_value || '').split('\\n').map(s => s.trim()).filter(Boolean))];\n    const suspicious = names.filter(n => SUSPICIOUS.test(n + '.'));\n    const issuer = (String(c.issuer_name || '').match(/O=([^,]+)/) || [])[1] || c.issuer_name || 'n/a';\n    out.push({ json: {\n      kind: 'finding', vendor_id: v.vendor_id, source: 'ct_log', source_ref: 'ct:' + c.id,\n      title: ('Nuevo certificado emitido para ' + (c.common_name || v.domain) + ' (' + issuer + ')').slice(0, 300),\n      description: 'Dominios: ' + names.slice(0, 20).join(', ') +\n        (suspicious.length ? ' · Posibles hosts no productivos/administrativos: ' + suspicious.slice(0, 10).join(', ') : ''),\n      severity: suspicious.length ? 'medium' : 'low',\n      evidence: { crtsh_id: c.id, serial: c.serial_number, issuer: c.issuer_name, names: names.slice(0, 50),\n                  not_before: c.not_before, not_after: c.not_after, logged_at: c.entry_timestamp }\n    }});\n  }\n}\nconst findings = out.length;\nout.push({ json: { kind: 'summary', job_type: 'ct_log', interval_min: 1440,\n  status: failed === 0 ? 'ok' : (ok === 0 ? 'error' : 'partial'),\n  meta: { domains: items.length, ok, failed, findings, lookback_days: LOOKBACK_DAYS } } });\nreturn out;"
+      },
+      "id": "parse",
+      "name": "Parse Certs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.kind }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "finding"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-finding",
+      "name": "IF Is Finding",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO vendor_findings\n  (vendor_id, source, source_ref, title, description, severity, status, evidence, detected_at, due_date)\nVALUES ($1::uuid, $2, $3, $4, $5, $6::finding_severity, 'open'::finding_status, $7::jsonb, now(),\n  now() + CASE $6::finding_severity\n    WHEN 'critical' THEN INTERVAL '7 days'\n    WHEN 'high' THEN INTERVAL '14 days'\n    WHEN 'medium' THEN INTERVAL '30 days'\n    ELSE INTERVAL '60 days' END)\nON CONFLICT (vendor_id, source, source_ref) DO NOTHING\nRETURNING id, vendor_id, source, source_ref, title, severity;",
+        "options": {
+          "queryReplacement": "={{ [$json.vendor_id, $json.source, $json.source_ref, $json.title, $json.description, $json.severity, JSON.stringify($json.evidence || {})] }}"
+        }
+      },
+      "id": "pg-insert",
+      "name": "Insert Finding",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1660,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/findings-created",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Signature",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ finding_id: $json.id, vendor_id: $json.vendor_id, severity: $json.severity, source: $json.source, title: $json.title }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "notify",
+      "name": "Notify Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ['critical','high'].includes($('Insert Finding').item.json.severity) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-severe",
+      "name": "IF Severe",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2140,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/vrm-alerts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Alert-Token",
+              "value": "={{ $env.ALERTS_WEBHOOK_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'finding', severity: $('Insert Finding').item.json.severity, title: $('Insert Finding').item.json.title, vendor_id: $('Insert Finding').item.json.vendor_id, source: $('Insert Finding').item.json.source, source_ref: $('Insert Finding').item.json.source_ref }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "alert",
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2380,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO monitoring_jobs (vendor_id, job_type, last_run, next_run, status, result_meta)\nVALUES (NULL, $1, $5::timestamptz, now() + make_interval(mins => $2::int), $3, $4::jsonb)\nON CONFLICT (job_type) WHERE vendor_id IS NULL\nDO UPDATE SET last_run = EXCLUDED.last_run, next_run = EXCLUDED.next_run,\n              status = EXCLUDED.status, result_meta = EXCLUDED.result_meta;",
+        "options": {
+          "queryReplacement": "={{ [$json.job_type, $json.interval_min, $json.status, JSON.stringify($json.meta || {}), $json.last_run || new Date().toISOString()] }}"
+        }
+      },
+      "id": "pg-log",
+      "name": "Log Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1660,
+        500
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Cron 24h": {
+      "main": [
+        [
+          {
+            "node": "Get Vendors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Vendors": {
+      "main": [
+        [
+          {
+            "node": "Extract Domain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Domain": {
+      "main": [
+        [
+          {
+            "node": "crt.sh Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "crt.sh Query": {
+      "main": [
+        [
+          {
+            "node": "Parse Certs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Certs": {
+      "main": [
+        [
+          {
+            "node": "IF Is Finding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Is Finding": {
+      "main": [
+        [
+          {
+            "node": "Insert Finding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Finding": {
+      "main": [
+        [
+          {
+            "node": "Notify Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Backend": {
+      "main": [
+        [
+          {
+            "node": "IF Severe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Severe": {
+      "main": [
+        [
+          {
+            "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Lima"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [
+    {
+      "name": "monitoring"
+    },
+    {
+      "name": "ct-logs"
+    }
+  ]
+}

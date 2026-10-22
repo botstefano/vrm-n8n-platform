@@ -1,0 +1,146 @@
+{
+  "name": "WF-00 Global Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "err",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $input.first().json;\nconst wf = (e.workflow && e.workflow.name) || 'desconocido';\nconst ex = e.execution || {};\nconst msg = (ex.error && ex.error.message) || 'sin mensaje';\nconst node = ex.lastNodeExecuted || (ex.error && ex.error.node && ex.error.node.name) || 'n/a';\nreturn [{ json: {\n  workflow: wf,\n  workflow_id: e.workflow && e.workflow.id,\n  execution_id: ex.id,\n  execution_url: ex.url,\n  node,\n  message: String(msg).slice(0, 500)\n}}];"
+      },
+      "id": "build",
+      "name": "Build Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/vrm-alerts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Alert-Token",
+              "value": "={{ $env.ALERTS_WEBHOOK_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'workflow_failed', severity: 'high', title: 'Falló el workflow ' + $json.workflow, description: $json.node + ': ' + $json.message + ' · ' + $json.execution_url, source: 'n8n', source_ref: $json.workflow + ':' + $json.node, fingerprint: 'wf_error:' + $json.workflow + ':' + $json.node }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "alert",
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-failed",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Signature",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workflow: $('Build Payload').first().json.workflow, execution_id: $('Build Payload').first().json.execution_id, node: $('Build Payload').first().json.node, error: $('Build Payload').first().json.message }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "report",
+      "name": "Report Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        940,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payload": {
+      "main": [
+        [
+          {
+            "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Alert": {
+      "main": [
+        [
+          {
+            "node": "Report Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Lima"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [
+    {
+      "name": "core"
+    },
+    {
+      "name": "errors"
+    }
+  ]
+}

@@ -1,0 +1,448 @@
+{
+  "name": "WF-01 NVD CVE Monitoring",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "cron",
+      "name": "Cron 6h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT GREATEST(COALESCE(MAX(last_run), now() - INTERVAL '1 day'), now() - INTERVAL '119 days') AS win_start,\n       now() AS win_end\nFROM monitoring_jobs WHERE job_type = 'nvd' AND vendor_id IS NULL;",
+        "options": {}
+      },
+      "id": "pg-window",
+      "name": "Get Window",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT vt.id, vt.vendor_id, vt.product_name, vt.cpe_match\nFROM vendor_technologies vt\nJOIN vendors v ON v.id = vt.vendor_id\nWHERE vt.is_active AND v.status IN ('approved','conditional','monitoring','incident', 'reevaluation');",
+        "options": {}
+      },
+      "id": "pg-tech",
+      "name": "Get Technologies",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        700,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "virtualMatchString",
+              "value": "={{ $json.cpe_match }}"
+            },
+            {
+              "name": "lastModStartDate",
+              "value": "={{ new Date($('Get Window').first().json.win_start).toISOString().replace('Z', '+00:00') }}"
+            },
+            {
+              "name": "lastModEndDate",
+              "value": "={{ new Date($('Get Window').first().json.win_end).toISOString().replace('Z', '+00:00') }}"
+            },
+            {
+              "name": "resultsPerPage",
+              "value": "200"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 700
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "nvd",
+      "name": "NVD Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        940,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "httpHeaderNvd",
+          "name": "NVD API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 6000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const MIN = Number($env.NVD_MIN_CVSS || 7.0);\nconst win = $('Get Window').first().json;\nconst items = $input.all();\nconst seen = new Set();\nconst out = [];\nlet failed = 0, scanned = 0, belowThreshold = 0;\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json;\n  const tech = $('Get Technologies').itemMatching(i).json;\n  if (!resp || resp.statusCode !== 200 || !resp.body || !Array.isArray(resp.body.vulnerabilities)) { failed++; continue; }\n  scanned++;\n  for (const entry of resp.body.vulnerabilities) {\n    const cve = entry.cve;\n    if (!cve || cve.vulnStatus === 'Rejected') continue;\n    const m = cve.metrics || {};\n    const metric = (m.cvssMetricV40 || m.cvssMetricV31 || m.cvssMetricV30 || m.cvssMetricV2 || [])[0];\n    const score = metric && metric.cvssData ? Number(metric.cvssData.baseScore) : null;\n    if (score === null || isNaN(score) || score < MIN) { belowThreshold++; continue; }\n    const key = tech.vendor_id + '|' + cve.id;\n    if (seen.has(key)) continue;\n    seen.add(key);\n    const severity = score >= 9 ? 'critical' : score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low';\n    const desc = ((cve.descriptions || []).find(d => d.lang === 'en') || {}).value || 'Sin descripción';\n    out.push({ json: {\n      kind: 'finding', vendor_id: tech.vendor_id, source: 'nvd', source_ref: cve.id,\n      title: (cve.id + ' (CVSS ' + score + ') — ' + (tech.product_name || tech.cpe_match)).slice(0, 300),\n      description: desc.slice(0, 2000), severity,\n      evidence: { cve_id: cve.id, cvss: score, published: cve.published, last_modified: cve.lastModified,\n                  cpe_match: tech.cpe_match,\n                  references: (cve.references || []).slice(0, 5).map(r => r.url) }\n    }});\n  }\n}\nconst findings = out.length;\n// Si hubo fallos NO avanzamos la ventana, para reintentar esos rangos (los findings se deduplican).\nout.push({ json: { kind: 'summary', job_type: 'nvd', interval_min: 360,\n  status: failed > 0 ? 'partial' : 'ok',\n  last_run: failed > 0 ? win.win_start : win.win_end,\n  meta: { technologies: items.length, scanned, failed, findings, below_threshold: belowThreshold,\n          window: [win.win_start, win.win_end] } } });\nreturn out;"
+      },
+      "id": "parse",
+      "name": "Parse CVEs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.kind }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "finding"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-finding",
+      "name": "IF Is Finding",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO vendor_findings\n  (vendor_id, source, source_ref, title, description, severity, status, evidence, detected_at, due_date)\nVALUES ($1::uuid, $2, $3, $4, $5, $6::finding_severity, 'open'::finding_status, $7::jsonb, now(),\n  now() + CASE $6::finding_severity\n    WHEN 'critical' THEN INTERVAL '7 days'\n    WHEN 'high' THEN INTERVAL '14 days'\n    WHEN 'medium' THEN INTERVAL '30 days'\n    ELSE INTERVAL '60 days' END)\nON CONFLICT (vendor_id, source, source_ref) DO NOTHING\nRETURNING id, vendor_id, source, source_ref, title, severity;",
+        "options": {
+          "queryReplacement": "={{ [$json.vendor_id, $json.source, $json.source_ref, $json.title, $json.description, $json.severity, JSON.stringify($json.evidence || {})] }}"
+        }
+      },
+      "id": "pg-insert",
+      "name": "Insert Finding",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1660,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/findings-created",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Signature",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ finding_id: $json.id, vendor_id: $json.vendor_id, severity: $json.severity, source: $json.source, title: $json.title }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "notify",
+      "name": "Notify Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ['critical','high'].includes($('Insert Finding').item.json.severity) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-severe",
+      "name": "IF Severe",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2140,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/vrm-alerts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Alert-Token",
+              "value": "={{ $env.ALERTS_WEBHOOK_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'finding', severity: $('Insert Finding').item.json.severity, title: $('Insert Finding').item.json.title, vendor_id: $('Insert Finding').item.json.vendor_id, source: $('Insert Finding').item.json.source, source_ref: $('Insert Finding').item.json.source_ref }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "alert",
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2380,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO monitoring_jobs (vendor_id, job_type, last_run, next_run, status, result_meta)\nVALUES (NULL, $1, $5::timestamptz, now() + make_interval(mins => $2::int), $3, $4::jsonb)\nON CONFLICT (job_type) WHERE vendor_id IS NULL\nDO UPDATE SET last_run = EXCLUDED.last_run, next_run = EXCLUDED.next_run,\n              status = EXCLUDED.status, result_meta = EXCLUDED.result_meta;",
+        "options": {
+          "queryReplacement": "={{ [$json.job_type, $json.interval_min, $json.status, JSON.stringify($json.meta || {}), $json.last_run || new Date().toISOString()] }}"
+        }
+      },
+      "id": "pg-log",
+      "name": "Log Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1660,
+        500
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Cron 6h": {
+      "main": [
+        [
+          {
+            "node": "Get Window",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Window": {
+      "main": [
+        [
+          {
+            "node": "Get Technologies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Technologies": {
+      "main": [
+        [
+          {
+            "node": "NVD Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NVD Query": {
+      "main": [
+        [
+          {
+            "node": "Parse CVEs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse CVEs": {
+      "main": [
+        [
+          {
+            "node": "IF Is Finding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Is Finding": {
+      "main": [
+        [
+          {
+            "node": "Insert Finding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Finding": {
+      "main": [
+        [
+          {
+            "node": "Notify Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Backend": {
+      "main": [
+        [
+          {
+            "node": "IF Severe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Severe": {
+      "main": [
+        [
+          {
+            "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Lima"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [
+    {
+      "name": "monitoring"
+    },
+    {
+      "name": "nvd"
+    }
+  ]
+}

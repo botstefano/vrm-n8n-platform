@@ -1,0 +1,241 @@
+{
+  "name": "WF-08 Health Check",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "cron",
+      "name": "Cron 30m",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.VRM_BACKEND_URL }}/health",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "health",
+      "name": "Backend Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_type, MAX(last_run) AS last_run, MAX(status) AS status\nFROM monitoring_jobs GROUP BY job_type ORDER BY job_type;",
+        "options": {}
+      },
+      "id": "pg-jobs",
+      "name": "Get Job Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        700,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Intervalo esperado (min). Un job se considera atrasado si supera 2x ese intervalo.\nconst EXPECTED = { nvd: 360, ct_log: 1440, tls_expiry: 1440, shodan: 1440,\n                   scorecard_refresh_all: 60, cleanup_archive: 1440 };\nconst jobs = $input.all().map(i => i.json).filter(j => j.job_type);\nconst byType = Object.fromEntries(jobs.map(j => [j.job_type, j]));\nconst now = Date.now();\nconst problems = [];\nfor (const [type, exp] of Object.entries(EXPECTED)) {\n  const j = byType[type];\n  if (!j || !j.last_run) { problems.push({ name: type, issue: 'nunca se ha ejecutado' }); continue; }\n  const age = Math.round((now - new Date(j.last_run).getTime()) / 60000);\n  if (age > exp * 2) problems.push({ name: type, issue: 'atrasado ' + age + ' min (esperado cada ' + exp + ')' });\n  else if (j.status === 'error') problems.push({ name: type, issue: 'última ejecución con estado error' });\n}\nconst h = $('Backend Health').first().json || {};\nconst backendOk = h.statusCode >= 200 && h.statusCode < 300;\nif (!backendOk) problems.unshift({ name: 'backend', issue: 'health check falló (' + (h.statusCode || h.error || 'sin respuesta') + ')' });\nreturn [{ json: {\n  healthy: problems.length === 0,\n  backend_down: !backendOk,\n  problems,\n  fingerprint: 'n8n_health:' + problems.map(p => p.name).sort().join(',')\n}}];"
+      },
+      "id": "detect",
+      "name": "Detect Problems",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.healthy }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-bad",
+      "name": "IF Unhealthy",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/vrm-alerts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Alert-Token",
+              "value": "={{ $env.ALERTS_WEBHOOK_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'n8n_health', severity: $json.backend_down ? 'critical' : 'high', title: 'VRM: ' + $json.problems.length + ' problema(s) de salud detectados', description: $json.problems.map(p => p.name + ': ' + p.issue).join(' | '), source: 'n8n', source_ref: 'health', fingerprint: $json.fingerprint }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "alert",
+      "name": "Alert Unhealthy",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1420,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "ok",
+      "name": "Healthy",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1420,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Cron 30m": {
+      "main": [
+        [
+          {
+            "node": "Backend Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backend Health": {
+      "main": [
+        [
+          {
+            "node": "Get Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Job Status": {
+      "main": [
+        [
+          {
+            "node": "Detect Problems",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Problems": {
+      "main": [
+        [
+          {
+            "node": "IF Unhealthy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Unhealthy": {
+      "main": [
+        [
+          {
+            "node": "Alert Unhealthy",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Healthy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Lima"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [
+    {
+      "name": "monitoring"
+    },
+    {
+      "name": "health"
+    }
+  ]
+}

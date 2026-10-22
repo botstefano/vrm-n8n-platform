@@ -1,0 +1,411 @@
+{
+  "name": "WF-06 Alerts Multi-channel",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vrm-alerts",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook Alert",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "webhookId": "vrm-alerts-webhook",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "httpHeaderAlerts",
+          "name": "VRM Alerts Webhook Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst allowed = ['critical', 'high', 'medium', 'low', 'info'];\nconst s = String(b.severity || 'medium').toLowerCase();\nconst severity = allowed.includes(s) ? s : 'medium';\nconst route = (severity === 'critical' || severity === 'high') ? 'slack+email' : 'slack';\nconst title = String(b.title || 'Alerta sin título').slice(0, 300);\nconst fingerprint = b.fingerprint || [b.source || 'unknown', b.source_ref || title, b.vendor_id || '', severity].join(':');\nconst front = String($env.VRM_FRONTEND_URL || $env.VRM_BACKEND_URL || '').replace(/\\/$/, '');\nconst esc = x => String(x == null ? '' : x).replace(/[&<>\"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst slackEsc = x => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst link = b.vendor_id ? front + '/vendors/' + b.vendor_id : front;\nconst slack_text = ':rotating_light: *[' + severity.toUpperCase() + ']* ' + slackEsc(title) +\n  (b.vendor_id ? '\\nProveedor: `' + slackEsc(b.vendor_id) + '`' : '') +\n  '\\nFuente: ' + slackEsc(b.source || 'n/a') + (b.source_ref ? ' · ' + slackEsc(b.source_ref) : '') +\n  (b.description ? '\\n' + slackEsc(String(b.description).slice(0, 500)) : '') +\n  (link ? '\\n<' + link + '|Ver en VRM>' : '');\nconst email_html = '<h2>Alerta VRM</h2>' +\n  '<p><b>Severidad:</b> ' + esc(severity) + '</p>' +\n  '<p><b>Título:</b> ' + esc(title) + '</p>' +\n  (b.vendor_id ? '<p><b>Proveedor:</b> ' + esc(b.vendor_id) + '</p>' : '') +\n  '<p><b>Fuente:</b> ' + esc(b.source || 'n/a') + ' — ' + esc(b.source_ref || '') + '</p>' +\n  (b.description ? '<p>' + esc(String(b.description).slice(0, 1000)) + '</p>' : '') +\n  (link ? '<p><a href=\"' + esc(link) + '\">Ver en VRM</a></p>' : '');\nreturn [{ json: { severity, route, title, fingerprint, slack_text,\n  email_subject: '[' + severity.toUpperCase() + '] VRM Alert: ' + title, email_html } }];"
+      },
+      "id": "normalize",
+      "name": "Normalize Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "dedupe",
+        "key": "=alert:dedupe:{{ $json.fingerprint }}",
+        "keyType": "automatic",
+        "options": {}
+      },
+      "id": "redis-get",
+      "name": "Check Dedupe",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        700,
+        300
+      ],
+      "credentials": {
+        "redis": {
+          "id": "redisVrm",
+          "name": "Redis VRM"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.dedupe ? 'dup' : 'new' }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "new"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-new",
+      "name": "IF Not Duplicate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "=alert:dedupe:{{ $('Normalize Alert').first().json.fingerprint }}",
+        "value": "1",
+        "keyType": "string",
+        "expire": true,
+        "ttl": 3600
+      },
+      "id": "redis-set",
+      "name": "Mark Dedupe 1h",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        100
+      ],
+      "credentials": {
+        "redis": {
+          "id": "redisVrm",
+          "name": "Redis VRM"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $('Normalize Alert').first().json.slack_text }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "slack",
+      "name": "Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1420,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Normalize Alert').first().json.route }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "slack+email"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-email",
+      "name": "IF Requires Email",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1660,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT u.email FROM users u\nJOIN user_roles ur ON ur.user_id = u.id\nJOIN roles r ON r.id = ur.role_id\nWHERE r.code IN ('admin','risk_analyst') AND u.is_active = true;",
+        "options": {}
+      },
+      "id": "pg-rcpt",
+      "name": "Get Recipients",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1900,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const list = [...new Set($input.all().map(i => i.json.email).filter(Boolean))];\nconst to = list.join(',') || $env.ALERT_FALLBACK_EMAIL || $env.SMTP_FROM;\nreturn [{ json: { to } }];"
+      },
+      "id": "join",
+      "name": "Join Recipients",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $('Normalize Alert').first().json.email_subject }}",
+        "emailFormat": "html",
+        "html": "={{ $('Normalize Alert').first().json.email_html }}",
+        "options": {}
+      },
+      "id": "smtp",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2380,
+        -100
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "smtpVrm",
+          "name": "SMTP VRM"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, deduped: false } }}",
+        "options": {}
+      },
+      "id": "respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2620,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, deduped: true } }}",
+        "options": {}
+      },
+      "id": "respond-dupe",
+      "name": "Respond Duplicate",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1180,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Alert": {
+      "main": [
+        [
+          {
+            "node": "Normalize Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Alert": {
+      "main": [
+        [
+          {
+            "node": "Check Dedupe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Dedupe": {
+      "main": [
+        [
+          {
+            "node": "IF Not Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Dedupe 1h": {
+      "main": [
+        [
+          {
+            "node": "Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack": {
+      "main": [
+        [
+          {
+            "node": "IF Requires Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recipients": {
+      "main": [
+        [
+          {
+            "node": "Join Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Join Recipients": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Not Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Mark Dedupe 1h",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Requires Email": {
+      "main": [
+        [
+          {
+            "node": "Get Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Lima"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [
+    {
+      "name": "alerts"
+    }
+  ]
+}

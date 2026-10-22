@@ -1,0 +1,575 @@
+{
+  "name": "WF-04 Attack Surface (Shodan)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "id": "cron",
+      "name": "Cron 24h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, legal_name, website FROM vendors WHERE status IN ('approved','conditional','monitoring','incident') AND website IS NOT NULL ORDER BY criticality DESC LIMIT 200;",
+        "options": {}
+      },
+      "id": "pg-vendors",
+      "name": "Get Vendors",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\nfor (const it of $input.all()) {\n  try {\n    const u = new URL(/^https?:\\/\\//i.test(it.json.website) ? it.json.website : 'https://' + it.json.website);\n    out.push({ json: { vendor_id: it.json.id, host: u.hostname.toLowerCase() } });\n  } catch (e) { /* ignorar URL inválida */ }\n}\nreturn out;"
+      },
+      "id": "extract",
+      "name": "Extract Host",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.shodan.io/dns/resolve",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "hostnames",
+              "value": "={{ $json.host }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "resolve",
+      "name": "Resolve IP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        940,
+        300
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "httpQueryShodan",
+          "name": "Shodan API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const prev = $('Extract Host').itemMatching(i).json;\n  const r = items[i].json;\n  const ip = r && r.statusCode === 200 && r.body && typeof r.body === 'object' ? r.body[prev.host] : null;\n  out.push({ json: ip ? { ...prev, ip } : { ...prev, skip: true } });\n}\nreturn out;"
+      },
+      "id": "extract-ip",
+      "name": "Extract IP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.skip === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-ip",
+      "name": "IF Has IP",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1420,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "skip",
+      "name": "Skip",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1660,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.shodan.io/shodan/host/{{ $json.ip }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "minify",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "shodan",
+      "name": "Shodan Host",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1660,
+        300
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "httpQueryShodan",
+          "name": "Shodan API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const PORTS = {\n  21: ['FTP', 'medium'], 23: ['Telnet', 'high'], 135: ['MS-RPC', 'high'], 139: ['NetBIOS', 'high'],\n  445: ['SMB', 'critical'], 1433: ['MS SQL', 'high'], 1521: ['Oracle DB', 'high'], 3306: ['MySQL', 'high'],\n  3389: ['RDP', 'critical'], 5432: ['PostgreSQL', 'high'], 5900: ['VNC', 'high'], 6379: ['Redis', 'critical'],\n  9200: ['Elasticsearch', 'high'], 11211: ['Memcached', 'high'], 27017: ['MongoDB', 'critical']\n};\nconst targets = $('Extract IP').all().map(i => i.json).filter(t => t.ip);\nconst out = [];\nlet failed = 0, scanned = 0, noData = 0;\nfor (const it of $input.all()) {\n  const r = it.json;\n  if (r.statusCode === 404) { noData++; continue; }          // Shodan sin datos para esa IP\n  if (r.statusCode !== 200 || !r.body) { failed++; continue; }\n  scanned++;\n  const h = r.body;\n  const t = targets.find(x => x.ip === h.ip_str);\n  if (!t) continue;\n  for (const p of (h.ports || [])) {\n    const d = PORTS[p];\n    if (!d) continue;\n    out.push({ json: { kind: 'finding', vendor_id: t.vendor_id, source: 'shodan',\n      source_ref: 'port:' + h.ip_str + ':' + p,\n      title: 'Puerto ' + p + ' (' + d[0] + ') expuesto en ' + t.host,\n      description: 'Shodan detecta ' + d[0] + ' accesible desde Internet en ' + h.ip_str + ':' + p + '.',\n      severity: d[1],\n      evidence: { host: t.host, ip: h.ip_str, port: p, service: d[0], org: h.org, last_update: h.last_update } } });\n  }\n  const vulns = Array.isArray(h.vulns) ? h.vulns : Object.keys(h.vulns || {});\n  if (vulns.length) {\n    out.push({ json: { kind: 'finding', vendor_id: t.vendor_id, source: 'shodan', source_ref: 'cves:' + h.ip_str,\n      title: vulns.length + ' CVE(s) potenciales en ' + t.host + ' (' + h.ip_str + ')',\n      description: 'Shodan asocia estas CVEs a los banners: ' + vulns.slice(0, 20).join(', '),\n      severity: 'high',\n      evidence: { host: t.host, ip: h.ip_str, cves: vulns.slice(0, 20), total: vulns.length } } });\n  }\n}\nconst findings = out.length;\nout.push({ json: { kind: 'summary', job_type: 'shodan', interval_min: 1440,\n  status: failed === 0 ? 'ok' : (scanned === 0 ? 'error' : 'partial'),\n  meta: { scanned, failed, no_data: noData, findings } } });\nreturn out;"
+      },
+      "id": "analyze",
+      "name": "Analyze Surface",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.kind }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "finding"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-finding",
+      "name": "IF Is Finding",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2140,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO vendor_findings\n  (vendor_id, source, source_ref, title, description, severity, status, evidence, detected_at, due_date)\nVALUES ($1::uuid, $2, $3, $4, $5, $6::finding_severity, 'open'::finding_status, $7::jsonb, now(),\n  now() + CASE $6::finding_severity\n    WHEN 'critical' THEN INTERVAL '7 days'\n    WHEN 'high' THEN INTERVAL '14 days'\n    WHEN 'medium' THEN INTERVAL '30 days'\n    ELSE INTERVAL '60 days' END)\nON CONFLICT (vendor_id, source, source_ref) DO NOTHING\nRETURNING id, vendor_id, source, source_ref, title, severity;",
+        "options": {
+          "queryReplacement": "={{ [$json.vendor_id, $json.source, $json.source_ref, $json.title, $json.description, $json.severity, JSON.stringify($json.evidence || {})] }}"
+        }
+      },
+      "id": "pg-insert",
+      "name": "Insert Finding",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2380,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/findings-created",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Signature",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ finding_id: $json.id, vendor_id: $json.vendor_id, severity: $json.severity, source: $json.source, title: $json.title }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "notify",
+      "name": "Notify Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2620,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ['critical','high'].includes($('Insert Finding').item.json.severity) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-severe",
+      "name": "IF Severe",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2860,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/vrm-alerts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Alert-Token",
+              "value": "={{ $env.ALERTS_WEBHOOK_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'finding', severity: $('Insert Finding').item.json.severity, title: $('Insert Finding').item.json.title, vendor_id: $('Insert Finding').item.json.vendor_id, source: $('Insert Finding').item.json.source, source_ref: $('Insert Finding').item.json.source_ref }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "alert",
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3100,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO monitoring_jobs (vendor_id, job_type, last_run, next_run, status, result_meta)\nVALUES (NULL, $1, $5::timestamptz, now() + make_interval(mins => $2::int), $3, $4::jsonb)\nON CONFLICT (job_type) WHERE vendor_id IS NULL\nDO UPDATE SET last_run = EXCLUDED.last_run, next_run = EXCLUDED.next_run,\n              status = EXCLUDED.status, result_meta = EXCLUDED.result_meta;",
+        "options": {
+          "queryReplacement": "={{ [$json.job_type, $json.interval_min, $json.status, JSON.stringify($json.meta || {}), $json.last_run || new Date().toISOString()] }}"
+        }
+      },
+      "id": "pg-log",
+      "name": "Log Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2380,
+        500
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Cron 24h": {
+      "main": [
+        [
+          {
+            "node": "Get Vendors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Vendors": {
+      "main": [
+        [
+          {
+            "node": "Extract Host",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Host": {
+      "main": [
+        [
+          {
+            "node": "Resolve IP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve IP": {
+      "main": [
+        [
+          {
+            "node": "Extract IP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract IP": {
+      "main": [
+        [
+          {
+            "node": "IF Has IP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shodan Host": {
+      "main": [
+        [
+          {
+            "node": "Analyze Surface",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has IP": {
+      "main": [
+        [
+          {
+            "node": "Shodan Host",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Surface": {
+      "main": [
+        [
+          {
+            "node": "IF Is Finding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Is Finding": {
+      "main": [
+        [
+          {
+            "node": "Insert Finding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Finding": {
+      "main": [
+        [
+          {
+            "node": "Notify Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Backend": {
+      "main": [
+        [
+          {
+            "node": "IF Severe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Severe": {
+      "main": [
+        [
+          {
+            "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Lima"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [
+    {
+      "name": "monitoring"
+    },
+    {
+      "name": "shodan"
+    }
+  ]
+}

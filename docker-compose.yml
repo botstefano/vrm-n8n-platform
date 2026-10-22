@@ -1,0 +1,41 @@
+# Entorno local completo: n8n + PostgreSQL (con esquema y datos de ejemplo) + Redis + backend simulado.
+# Uso:  cp automation/n8n/.env.example automation/n8n/.env   (editar secretos)   →   docker compose up -d
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file: ./automation/n8n/.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database:/docker-entrypoint-initdb.d:ro      # ejecuta 01-schema.sql y 02-seed.sql en el primer arranque
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+
+  mock-backend:
+    image: python:3.12-alpine
+    command: ["python", "/app/server.py"]
+    volumes:
+      - ./mock-backend:/app:ro
+    ports: ["8000:8000"]
+
+  n8n:
+    image: ${N8N_IMAGE:-docker.n8n.io/n8nio/n8n:latest}   # fija una versión concreta en producción
+    env_file: ./automation/n8n/.env
+    ports: ["5678:5678"]
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+
+volumes:
+  pgdata:
+  n8n_data:

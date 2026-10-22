@@ -1,0 +1,345 @@
+{
+  "name": "WF-03 TLS Certificate Expiry",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "id": "cron",
+      "name": "Cron 24h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, website FROM vendors WHERE status IN ('approved','conditional','monitoring','incident') AND website IS NOT NULL;",
+        "options": {}
+      },
+      "id": "pg-vendors",
+      "name": "Get Vendors",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": {
+        "jsCode": "const tls = require('tls');\nconst BLOCKED = /^(localhost|.*\\.local|.*\\.internal|.*\\.lan)$/i;\nconst PRIVATE = /^(10\\.|127\\.|0\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/;\n\nfunction probe(host, port) {\n  return new Promise(resolve => {\n    const sock = tls.connect({ host, port, servername: host, rejectUnauthorized: false }, () => {\n      const c = sock.getPeerCertificate();\n      sock.end();\n      resolve({ ok: !!(c && c.valid_to), cert: c });\n    });\n    sock.setTimeout(10000, () => { sock.destroy(); resolve({ ok: false, error: 'timeout' }); });\n    sock.on('error', e => resolve({ ok: false, error: e.message }));\n  });\n}\n\nconst items = $input.all();\nconst out = [];\nconst stats = { total: items.length, checked: 0, failed: 0, findings: 0 };\n\nfor (let i = 0; i < items.length; i += 5) {\n  const chunk = items.slice(i, i + 5);\n  const results = await Promise.all(chunk.map(async it => {\n    const v = it.json;\n    let host, port;\n    try {\n      const u = new URL(/^https?:\\/\\//i.test(v.website) ? v.website : 'https://' + v.website);\n      host = u.hostname; port = Number(u.port) || 443;\n    } catch (e) { return { v, error: 'invalid_url' }; }\n    if (BLOCKED.test(host) || PRIVATE.test(host)) return { v, host, port, error: 'blocked_host' };\n    return { v, host, port, ...(await probe(host, port)) };\n  }));\n  for (const r of results) {\n    if (!r.ok) { stats.failed++; continue; }\n    stats.checked++;\n    const notAfter = new Date(r.cert.valid_to);\n    const daysLeft = Math.floor((notAfter - Date.now()) / 86400000);\n    const severity = daysLeft < 7 ? 'critical' : daysLeft < 30 ? 'high' : daysLeft < 60 ? 'medium' : null;\n    if (!severity) continue;\n    const issuer = (r.cert.issuer && (r.cert.issuer.O || r.cert.issuer.CN)) || 'n/a';\n    stats.findings++;\n    out.push({ json: {\n      kind: 'finding', vendor_id: r.v.id, source: 'tls_expiry',\n      // El nivel de severidad forma parte de la referencia: escalar de nivel genera un hallazgo nuevo (y una alerta).\n      source_ref: 'tls:' + r.host + ':' + r.port + ':' + notAfter.toISOString().slice(0, 10) + ':' + severity,\n      title: daysLeft < 0 ? 'Certificado TLS EXPIRADO (' + r.host + ')'\n                          : 'Certificado TLS expira en ' + daysLeft + ' días (' + r.host + ')',\n      description: 'Emisor: ' + issuer + ' · Válido hasta ' + notAfter.toISOString(),\n      severity,\n      evidence: { host: r.host, port: r.port, days_left: daysLeft, issuer, not_after: notAfter.toISOString(),\n                  subject: r.cert.subject && r.cert.subject.CN }\n    }});\n  }\n}\nout.push({ json: { kind: 'summary', job_type: 'tls_expiry', interval_min: 1440,\n  status: stats.checked === 0 && stats.total > 0 ? 'error' : (stats.failed > 0 ? 'partial' : 'ok'),\n  meta: stats } });\nreturn out;"
+      },
+      "id": "probe",
+      "name": "Probe TLS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.kind }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "finding"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-finding",
+      "name": "IF Is Finding",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO vendor_findings\n  (vendor_id, source, source_ref, title, description, severity, status, evidence, detected_at, due_date)\nVALUES ($1::uuid, $2, $3, $4, $5, $6::finding_severity, 'open'::finding_status, $7::jsonb, now(),\n  now() + CASE $6::finding_severity\n    WHEN 'critical' THEN INTERVAL '7 days'\n    WHEN 'high' THEN INTERVAL '14 days'\n    WHEN 'medium' THEN INTERVAL '30 days'\n    ELSE INTERVAL '60 days' END)\nON CONFLICT (vendor_id, source, source_ref) DO NOTHING\nRETURNING id, vendor_id, source, source_ref, title, severity;",
+        "options": {
+          "queryReplacement": "={{ [$json.vendor_id, $json.source, $json.source_ref, $json.title, $json.description, $json.severity, JSON.stringify($json.evidence || {})] }}"
+        }
+      },
+      "id": "pg-insert",
+      "name": "Insert Finding",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1180,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/findings-created",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Signature",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ finding_id: $json.id, vendor_id: $json.vendor_id, severity: $json.severity, source: $json.source, title: $json.title }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "notify",
+      "name": "Notify Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1420,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ['critical','high'].includes($('Insert Finding').item.json.severity) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-severe",
+      "name": "IF Severe",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1660,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/vrm-alerts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Alert-Token",
+              "value": "={{ $env.ALERTS_WEBHOOK_TOKEN }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'finding', severity: $('Insert Finding').item.json.severity, title: $('Insert Finding').item.json.title, vendor_id: $('Insert Finding').item.json.vendor_id, source: $('Insert Finding').item.json.source, source_ref: $('Insert Finding').item.json.source_ref }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "alert",
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO monitoring_jobs (vendor_id, job_type, last_run, next_run, status, result_meta)\nVALUES (NULL, $1, $5::timestamptz, now() + make_interval(mins => $2::int), $3, $4::jsonb)\nON CONFLICT (job_type) WHERE vendor_id IS NULL\nDO UPDATE SET last_run = EXCLUDED.last_run, next_run = EXCLUDED.next_run,\n              status = EXCLUDED.status, result_meta = EXCLUDED.result_meta;",
+        "options": {
+          "queryReplacement": "={{ [$json.job_type, $json.interval_min, $json.status, JSON.stringify($json.meta || {}), $json.last_run || new Date().toISOString()] }}"
+        }
+      },
+      "id": "pg-log",
+      "name": "Log Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1180,
+        500
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Cron 24h": {
+      "main": [
+        [
+          {
+            "node": "Get Vendors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Vendors": {
+      "main": [
+        [
+          {
+            "node": "Probe TLS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Probe TLS": {
+      "main": [
+        [
+          {
+            "node": "IF Is Finding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Is Finding": {
+      "main": [
+        [
+          {
+            "node": "Insert Finding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Finding": {
+      "main": [
+        [
+          {
+            "node": "Notify Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Backend": {
+      "main": [
+        [
+          {
+            "node": "IF Severe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Severe": {
+      "main": [
+        [
+          {
+            "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Lima"
+  },
+  "active": false,
+  "pinData": {},
+  "tags": [
+    {
+      "name": "monitoring"
+    },
+    {
+      "name": "tls"
+    }
+  ]
+}
