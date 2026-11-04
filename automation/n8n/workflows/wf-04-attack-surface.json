@@ -24,7 +24,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id, legal_name, website FROM vendors WHERE status IN ('approved','conditional','monitoring','incident') AND website IS NOT NULL ORDER BY criticality DESC LIMIT 200;",
+        "query": "SELECT id, legal_name, website FROM vendors WHERE status IN ('approved','conditional','monitoring','incident','reevaluation') AND website IS NOT NULL ORDER BY criticality DESC LIMIT 200;",
         "options": {}
       },
       "id": "pg-vendors",
