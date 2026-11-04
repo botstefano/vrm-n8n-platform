@@ -290,8 +290,7 @@ export const INITIAL_ASSESSMENTS: Assessment[] = [
     status: 'completed',
     started_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 90).toISOString(),
     completed_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 85).toISOString(),
-    score: 88,
-    portal_token: 'eyJhbGciOiJIUzI1NiJ9.eyJhaWQiOiJhc20tMSJ9.verified'
+    score: 88
   },
   {
     id: 'asm-2',
@@ -300,8 +299,7 @@ export const INITIAL_ASSESSMENTS: Assessment[] = [
     status: 'completed',
     started_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 120).toISOString(),
     completed_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 115).toISOString(),
-    score: 92,
-    portal_token: 'eyJhbGciOiJIUzI1NiJ9.eyJhaWQiOiJhc20tMiJ9.verified'
+    score: 92
   }
 ];
 
