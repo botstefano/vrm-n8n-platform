@@ -218,6 +218,50 @@
           "name": "VRM Alerts Webhook Auth"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst recipients = $('Recipients').first().json || {};\nconst count = Number(recipients.count || 0);\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-09',\n  status: count > 0 ? 'success' : 'partial',\n  summary: count > 0 ? 'Digest semanal enviado a ' + count + ' destinatario(s).' : 'No hay destinatarios activos; no se envió el digest.',\n  details: { recipients: count }\n} }];"
+      },
+      "id": "manual-completion-code-wf-09",
+      "name": "Build Manual Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Signature",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "manual-completion-http-wf-09",
+      "name": "Report Manual Completion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2380,
+        520
+      ],
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -306,6 +350,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -314,6 +365,28 @@
         [
           {
             "node": "Risk Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Digest": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
             "type": "main",
             "index": 0
           }
