@@ -499,14 +499,21 @@ class VrmStore {
       source: params.source,
       source_ref: params.source_ref,
       description: params.description,
-      status: isDeduped ? 'deduped' : 'sent',
+      status: isDeduped ? 'deduped' : 'pending',
       slack_text,
       email_subject,
       email_html
     };
 
     this.alerts.unshift(alertItem);
-    this.remote(apiRequest('/api/alerts', { method: 'POST', body: params }));
+    this.remote(apiRequest<any>('/api/alerts', { method: 'POST', body: params }).then((saved) => {
+      const index = this.alerts.findIndex((item) => item.id === alertItem.id);
+      if (index >= 0) {
+        this.alerts[index] = { ...this.alerts[index], id: saved.id, timestamp: saved.timestamp, status: saved.status };
+        this.notify();
+      }
+      return saved;
+    }));
     this.logAudit('n8n:wf-06-alerts', 'dispatch_alert', 'alerts', alertItem.id, {
       route,
       severity: s,
