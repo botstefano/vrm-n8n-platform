@@ -21,5 +21,7 @@ jobs:
         run: npm install
       - name: TypeScript and Vite production build
         run: npm run build
+      - name: Check Express API JavaScript syntax
+        run: node --check server.js
       - name: Validate n8n workflow JSON
         run: node -e "const fs=require('fs'); for (const f of fs.readdirSync('automation/n8n/workflows').filter(x=>x.endsWith('.json'))) JSON.parse(fs.readFileSync('automation/n8n/workflows/'+f,'utf8')); console.log('All n8n workflow JSON files are valid.');"
