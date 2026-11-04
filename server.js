@@ -570,7 +570,7 @@ app.post('/api/vendors', allowRoles('admin','risk_analyst'), async (req, res, ne
 
 app.patch('/api/vendors/:id', allowRoles('admin','risk_analyst'), async (req, res, next) => {
   try {
-    const allowed = ['legal_name','website','status','criticality','current_risk','current_score','next_evaluation','primary_contact'];
+    const allowed = ['legal_name','website','status','criticality','next_evaluation','primary_contact'];
     const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => allowed.includes(key)));
     const { data, error } = await supabase.from('vendors').update(updates).eq('id', req.params.id).select().single();
     if (error) throw error;
