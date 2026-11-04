@@ -25,8 +25,9 @@ import {
   INITIAL_AUDIT_LOGS,
   INITIAL_SCORE_HISTORY
 } from '../data/seedData';
+import { apiRequest } from './api';
 
-const STORAGE_KEY_PREFIX = 'vrm_platform_';
+function createId(): string { return crypto.randomUUID(); }
 
 function loadFromStorage<T>(key: string, fallback: T): T {
   try {
@@ -108,18 +109,35 @@ class VrmStore {
   }
 
   private init() {
-    this.vendors = loadFromStorage('vendors', INITIAL_VENDORS);
-    this.technologies = loadFromStorage('technologies', INITIAL_TECHNOLOGIES);
-    this.questionnaires = loadFromStorage('questionnaires', INITIAL_QUESTIONNAIRES);
-    this.assessments = loadFromStorage('assessments', INITIAL_ASSESSMENTS);
-    this.findings = loadFromStorage('findings', INITIAL_FINDINGS);
-    this.monitoringJobs = loadFromStorage('monitoring_jobs', INITIAL_MONITORING_JOBS);
-    this.users = loadFromStorage('users', INITIAL_USERS);
-    this.auditLog = loadFromStorage('audit_log', INITIAL_AUDIT_LOGS);
-    this.auditArchive = loadFromStorage('audit_archive', []);
-    this.scoreHistory = loadFromStorage('score_history', INITIAL_SCORE_HISTORY);
-    this.alerts = loadFromStorage('alerts', []);
-    this.workflowLogs = loadFromStorage('workflow_logs', []);
+    // Supabase is the source of truth; never initialize demo data in browser storage.
+    this.vendors = []; this.technologies = []; this.questionnaires = []; this.assessments = [];
+    this.findings = []; this.monitoringJobs = []; this.users = []; this.auditLog = [];
+    this.auditArchive = []; this.scoreHistory = []; this.alerts = []; this.workflowLogs = [];
+  }
+
+  public async hydrateFromApi(): Promise<void> {
+    const data = await apiRequest<any>('/api/bootstrap');
+    this.vendors = data.vendors || [];
+    this.technologies = data.technologies || [];
+    this.questionnaires = data.questionnaires || [];
+    this.assessments = data.assessments || [];
+    this.findings = data.findings || [];
+    this.monitoringJobs = data.monitoringJobs || [];
+    this.users = data.users || [];
+    this.auditLog = data.auditLog || [];
+    this.auditArchive = data.auditArchive || [];
+    this.scoreHistory = data.scoreHistory || [];
+    this.alerts = data.alerts || [];
+    this.workflowLogs = data.workflowLogs || [];
+    this.notify();
+  }
+
+  private remote<T>(request: Promise<T>): void {
+    void request.catch((error) => {
+      const message = error instanceof Error ? error.message : 'Error al sincronizar con Supabase.';
+      console.error(message);
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('vrm-api-error', { detail: message }));
+    });
   }
 
   public subscribe(listener: () => void): () => void {
@@ -133,18 +151,7 @@ class VrmStore {
   }
 
   private persist() {
-    saveToStorage('vendors', this.vendors);
-    saveToStorage('technologies', this.technologies);
-    saveToStorage('questionnaires', this.questionnaires);
-    saveToStorage('assessments', this.assessments);
-    saveToStorage('findings', this.findings);
-    saveToStorage('monitoring_jobs', this.monitoringJobs);
-    saveToStorage('users', this.users);
-    saveToStorage('audit_log', this.auditLog);
-    saveToStorage('audit_archive', this.auditArchive);
-    saveToStorage('score_history', this.scoreHistory);
-    saveToStorage('alerts', this.alerts);
-    saveToStorage('workflow_logs', this.workflowLogs);
+    // Persistence is performed explicitly by authenticated API operations.
   }
 
   public resetToDefaults() {
@@ -203,7 +210,7 @@ class VrmStore {
 
   // Vendor Operations
   public addVendor(vendorData: Omit<Vendor, 'id' | 'created_at' | 'updated_at'>): Vendor {
-    const id = 'v-' + Math.random().toString(36).substring(2, 9);
+    const id = createId();
     const newVendor: Vendor = {
       ...vendorData,
       id,
@@ -212,6 +219,7 @@ class VrmStore {
     };
     this.vendors.unshift(newVendor);
     this.logAudit('admin@vrm.local', 'insert_vendor', 'vendors', id, { legal_name: newVendor.legal_name });
+    this.remote(apiRequest('/api/vendors', { method: 'POST', body: newVendor }));
     this.recalculateScorecard(id);
     this.notify();
     return newVendor;
@@ -226,6 +234,7 @@ class VrmStore {
         updated_at: new Date().toISOString()
       };
       this.logAudit('admin@vrm.local', 'update_vendor', 'vendors', id, updates);
+      this.remote(apiRequest(`/api/vendors/${id}`, { method: 'PATCH', body: updates }));
       this.notify();
     }
   }
@@ -239,6 +248,7 @@ class VrmStore {
     this.scoreHistory = this.scoreHistory.filter((sh) => sh.vendor_id !== id);
     if (v) {
       this.logAudit('admin@vrm.local', 'delete_vendor', 'vendors', id, { name: v.legal_name });
+      this.remote(apiRequest(`/api/vendors/${id}`, { method: 'DELETE' }));
     }
     this.notify();
   }
@@ -247,19 +257,21 @@ class VrmStore {
   public addTechnology(tech: Omit<VendorTechnology, 'id'>): VendorTechnology {
     const newTech: VendorTechnology = {
       ...tech,
-      id: 'vt-' + Math.random().toString(36).substring(2, 9)
+      id: createId()
     };
     this.technologies.push(newTech);
     this.logAudit('admin@vrm.local', 'insert_technology', 'vendor_technologies', newTech.id, {
       product: newTech.product_name,
       cpe: newTech.cpe_match
     });
+    this.remote(apiRequest('/api/technologies', { method: 'POST', body: newTech }));
     this.notify();
     return newTech;
   }
 
   public deleteTechnology(id: string): void {
     this.technologies = this.technologies.filter((t) => t.id !== id);
+    this.remote(apiRequest(`/api/technologies/${id}`, { method: 'DELETE' }));
     this.notify();
   }
 
@@ -295,7 +307,7 @@ class VrmStore {
       return null;
     }
 
-    const id = 'f-' + Math.random().toString(36).substring(2, 9);
+    const id = createId();
     const newFinding: VendorFinding = {
       ...findingData,
       id,
@@ -321,6 +333,7 @@ class VrmStore {
       });
     }
 
+    this.remote(apiRequest('/api/findings', { method: 'POST', body: newFinding }));
     this.recalculateScorecard(newFinding.vendor_id);
     this.notify();
     return newFinding;
@@ -340,6 +353,7 @@ class VrmStore {
         to: status,
         resolution
       });
+      this.remote(apiRequest(`/api/findings/${id}`, { method: 'PATCH', body: { status, resolution, due_date: f.due_date } }));
       this.recalculateScorecard(f.vendor_id);
       this.notify();
     }
@@ -446,73 +460,16 @@ class VrmStore {
     return { refreshed: count };
   }
 
-  // Periodic Re-evaluation Scheduler (WF-05 logic)
-  public triggerReevaluationForDue(): { assessmentsCreated: number; details: any[] } {
-    const dueVendors = this.vendors.filter((v) => {
-      const active = ['approved', 'conditional', 'monitoring'].includes(v.status);
-      const isDue = !v.next_evaluation || new Date(v.next_evaluation) <= new Date();
-      const hasPending = this.assessments.some(
-        (a) => a.vendor_id === v.id && (a.status === 'pending' || a.status === 'in_progress')
-      );
-      return active && isDue && !hasPending;
-    });
-
-    const details: any[] = [];
-    const activeQuestionnaire = this.questionnaires.find((q) => q.is_active) || this.questionnaires[0];
-
-    for (const v of dueVendors) {
-      const intervalDays = v.criticality >= 4 ? 90 : v.criticality === 3 ? 180 : 365;
-      const assessmentId = 'asm-' + Math.random().toString(36).substring(2, 9);
-
-      // Sign portal link (HMAC simulation matching WF-05: aid, vid, exp 30 days)
-      const payloadObj = {
-        aid: assessmentId,
-        vid: v.id,
-        exp: Date.now() + 30 * 86400000
-      };
-      const payloadBase64 = base64UrlEncode(JSON.stringify(payloadObj));
-      const sig = mockHmacSha256(payloadBase64, 'vrm-secret-portal-key');
-      const portalToken = `${payloadBase64}.${sig}`;
-
-      const newAssessment: Assessment = {
-        id: assessmentId,
-        vendor_id: v.id,
-        questionnaire_id: activeQuestionnaire.id,
-        status: 'pending',
-        started_at: new Date().toISOString(),
-        completed_at: null,
-        portal_token: portalToken
-      };
-
-      this.assessments.push(newAssessment);
-
-      // Update vendor status to reevaluation and next_evaluation
-      v.status = 'reevaluation';
-      const nextDate = new Date();
-      nextDate.setDate(nextDate.getDate() + intervalDays);
-      v.next_evaluation = nextDate.toISOString();
-      v.updated_at = new Date().toISOString();
-
-      this.logAudit('n8n:wf-05-reevaluation', 'create_assessment', 'assessments', assessmentId, {
-        vendor_id: v.id,
-        vendor_name: v.legal_name,
-        intervalDays
-      });
-
-      details.push({
-        vendor_id: v.id,
-        legal_name: v.legal_name,
-        email: v.primary_contact.email,
-        link: `/portal/assessment/${portalToken}`
-      });
-    }
-
-    this.notify();
-    return { assessmentsCreated: dueVendors.length, details };
+  // Re-evaluation creation is server-side; signing secrets never run in the browser.
+  public async triggerReevaluationForDue(): Promise<{ assessmentsCreated: number; assessments?: Assessment[] }> {
+    const result = await apiRequest<{ assessmentsCreated: number; assessments?: Assessment[] }>(
+      '/api/assessments/reevaluate', { method: 'POST', body: {} }
+    );
+    await this.hydrateFromApi();
+    return result;
   }
 
-  // Assessment Portal completion
-  public completeAssessment(assessmentId: string, calculatedScore: number = 88): void {
+  public completeAssessment(assessmentId: string, calculatedScore: number = 88, responses: Record<string, boolean> = {}): void {
     const asm = this.assessments.find((a) => a.id === assessmentId);
     if (!asm) return;
     asm.status = 'completed';
@@ -592,6 +549,7 @@ class VrmStore {
     };
 
     this.alerts.unshift(alertItem);
+    this.remote(apiRequest('/api/alerts', { method: 'POST', body: params }));
     this.logAudit('n8n:wf-06-alerts', 'dispatch_alert', 'alerts', alertItem.id, {
       route,
       severity: s,
@@ -608,6 +566,7 @@ class VrmStore {
     archivedAudit: number;
     purgedScores: number;
   } {
+    this.remote(apiRequest('/api/cleanup', { method: 'POST', body: { staleDays, retentionYears } }));
     const staleCutoff = new Date(Date.now() - staleDays * 86400000);
     let closedCount = 0;
 
@@ -677,299 +636,23 @@ class VrmStore {
     this.auditLog.unshift(entry);
   }
 
-  // Workflow Live Execution Simulator
+  // Manual runs are delegated to n8n; no simulated successful workflow runs.
   public async executeWorkflow(workflowId: string): Promise<WorkflowRunLog> {
-    const startTime = new Date().toISOString();
-    const runId = 'exec-' + Date.now().toString(36);
-    let runLog: WorkflowRunLog;
-
-    switch (workflowId) {
-      case 'wf-01': {
-        // NVD CVE Scanner
-        const techs = this.technologies.filter((t) => t.is_active);
-        const steps = [
-          { nodeId: 'cron', nodeName: 'Cron 6h', status: 'success' as const, durationMs: 12, outputPreview: 'Triggered schedule window' },
-          { nodeId: 'pg-window', nodeName: 'Get Window', status: 'success' as const, durationMs: 45, outputPreview: `Window: last 6h to ${new Date().toISOString()}` },
-          { nodeId: 'pg-tech', nodeName: 'Get Technologies', status: 'success' as const, durationMs: 38, outputPreview: `Retrieved ${techs.length} active technologies` },
-          { nodeId: 'http-nvd', nodeName: 'Query NVD 2.0 API', status: 'success' as const, durationMs: 410, outputPreview: 'Scanned CVE database for CPE matches' },
-          { nodeId: 'code-parse', nodeName: 'Filter CVSS >= 7.0', status: 'success' as const, durationMs: 25, outputPreview: 'Evaluated vulnerability metrics and impact scores' },
-          { nodeId: 'pg-insert', nodeName: 'Insert Findings (ON CONFLICT)', status: 'success' as const, durationMs: 65, outputPreview: 'Idempotent insertion completed' }
-        ];
-
-        // Simulate potential discovery for Cloudflare or GitHub
-        const newFinding = this.addFinding({
-          vendor_id: 'v-cloudflare',
-          source: 'nvd',
-          source_ref: `CVE-2024-${Math.floor(1000 + Math.random() * 9000)}`,
-          title: 'Remote Memory Disclosure in HTTP Parser Component',
-          description: 'A flaw in memory boundary validation inside the HTTP reverse proxy parsing pipeline allows an attacker to leak chunked buffers under high concurrency.',
-          severity: 'high',
-          status: 'open',
-          evidence: {
-            cve: `CVE-2024-${Math.floor(1000 + Math.random() * 9000)}`,
-            cvss: 7.8,
-            cpe: 'cpe:2.3:a:nginx:nginx:*:*:*:*:*:*:*:*'
-          },
-          due_date: new Date(Date.now() + 14 * 86400000).toISOString(),
-          closed_at: null
-        });
-
-        this.updateJobMeta('nvd', { items_scanned: techs.length, new_findings: newFinding ? 1 : 0, duration_ms: 595 });
-        runLog = {
-          id: runId,
-          workflowId,
-          workflowName: 'WF-01 NVD CVE Monitoring',
-          startedAt: startTime,
-          completedAt: new Date().toISOString(),
-          status: 'success',
-          steps,
-          summary: newFinding ? `Escaneó ${techs.length} tecnologías. Se detectó 1 nuevo CVE de severidad HIGH.` : `Escaneó ${techs.length} tecnologías. No se encontraron nuevas vulnerabilidades no registradas.`
-        };
-        break;
-      }
-
-      case 'wf-02': {
-        // CT Logs crt.sh
-        const steps = [
-          { nodeId: 'cron', nodeName: 'Cron 24h', status: 'success' as const, durationMs: 10, outputPreview: 'Daily Certificate Transparency trigger' },
-          { nodeId: 'pg-vendors', nodeName: 'Get Domains', status: 'success' as const, durationMs: 32, outputPreview: `Checked ${this.vendors.length} vendor domains` },
-          { nodeId: 'http-crtsh', nodeName: 'Query crt.sh Logs', status: 'success' as const, durationMs: 820, outputPreview: 'Fetched 34 recent certificate transparency records' },
-          { nodeId: 'code-flag', nodeName: 'Classify Sensitive Hosts', status: 'success' as const, durationMs: 35, outputPreview: 'Filtered subdomains matching (vpn|admin|staging|dev)' },
-          { nodeId: 'pg-insert', nodeName: 'Insert CT Findings', status: 'success' as const, durationMs: 40, outputPreview: 'Idempotency verified against uq_finding_source' }
-        ];
-
-        this.updateJobMeta('ct_log', { certs_evaluated: 34, new_findings: 0, duration_ms: 937 });
-        runLog = {
-          id: runId,
-          workflowId,
-          workflowName: 'WF-02 CT Logs (Certificate Transparency)',
-          startedAt: startTime,
-          completedAt: new Date().toISOString(),
-          status: 'success',
-          steps,
-          summary: 'Consulta a crt.sh exitosa. Se examinaron 34 certificados de los proveedores monitoreados.'
-        };
-        break;
-      }
-
-      case 'wf-03': {
-        // TLS Expiry
-        const steps = [
-          { nodeId: 'cron', nodeName: 'Cron 24h', status: 'success' as const, durationMs: 15, outputPreview: 'Daily TLS Expiry check' },
-          { nodeId: 'tls-connect', nodeName: 'Native TLS Handshake', status: 'success' as const, durationMs: 350, outputPreview: 'Inspected X.509 cert chains for 5 domains' },
-          { nodeId: 'eval-thresholds', nodeName: 'Evaluate <60d / <30d / <7d', status: 'success' as const, durationMs: 20, outputPreview: 'Threshold analysis completed' },
-          { nodeId: 'pg-update', nodeName: 'Log Run & Findings', status: 'success' as const, durationMs: 48, outputPreview: 'Monitoring job updated' }
-        ];
-
-        this.updateJobMeta('tls_expiry', { checked_hosts: this.vendors.length, expiring_critical: 1, duration_ms: 433 });
-        runLog = {
-          id: runId,
-          workflowId,
-          workflowName: 'WF-03 TLS Expiry & Cipher Verifier',
-          startedAt: startTime,
-          completedAt: new Date().toISOString(),
-          status: 'success',
-          steps,
-          summary: 'Verificación TLS completada sin errores. Todos los endpoints activos verificados.'
-        };
-        break;
-      }
-
-      case 'wf-04': {
-        // Attack Surface Shodan
-        const steps = [
-          { nodeId: 'cron', nodeName: 'Cron 24h', status: 'success' as const, durationMs: 12, outputPreview: 'Daily Attack Surface trigger' },
-          { nodeId: 'dns-resolve', nodeName: 'Resolve Hostnames to IPs', status: 'success' as const, durationMs: 110, outputPreview: 'Resolved 6 hostnames' },
-          { nodeId: 'shodan-query', nodeName: 'Query Shodan Host API', status: 'success' as const, durationMs: 680, outputPreview: 'Retrieved port telemetry and service banners' },
-          { nodeId: 'code-ports', nodeName: 'Filter Critical Exposed Ports', status: 'success' as const, durationMs: 28, outputPreview: 'Checked ports 3389, 445, 6379, 27017, 9200' },
-          { nodeId: 'notify', nodeName: 'Trigger Alert Webhook', status: 'success' as const, durationMs: 45, outputPreview: 'Alert dispatched to WF-06' }
-        ];
-
-        this.updateJobMeta('shodan', { hostnames_resolved: 6, open_ports_audited: 24, duration_ms: 875 });
-        runLog = {
-          id: runId,
-          workflowId,
-          workflowName: 'WF-04 Attack Surface (Shodan)',
-          startedAt: startTime,
-          completedAt: new Date().toISOString(),
-          status: 'success',
-          steps,
-          summary: 'Mapeo de superficie de ataque completado. Puertos de infraestructura bajo constante observación.'
-        };
-        break;
-      }
-
-      case 'wf-05': {
-        // Re-evaluation scheduler
-        const res = this.triggerReevaluationForDue();
-        const steps = [
-          { nodeId: 'cron', nodeName: 'Cron 6h', status: 'success' as const, durationMs: 10, outputPreview: 'Triggered 6h scheduler' },
-          { nodeId: 'pg-due', nodeName: 'Find Due Vendors', status: 'success' as const, durationMs: 38, outputPreview: `Identified ${res.assessmentsCreated} vendors due for re-eval` },
-          { nodeId: 'pg-reeval', nodeName: 'Create Assessment & Update Status', status: 'success' as const, durationMs: 72, outputPreview: 'Set vendor status = reevaluation' },
-          { nodeId: 'sign-link', nodeName: 'Sign HMAC Portal Link', status: 'success' as const, durationMs: 18, outputPreview: 'Generated SHA256 HMAC tokens' },
-          { nodeId: 'notify-backend', nodeName: 'Dispatch Vendor Email', status: 'success' as const, durationMs: 65, outputPreview: 'Assessment invites dispatched' }
-        ];
-
-        runLog = {
-          id: runId,
-          workflowId,
-          workflowName: 'WF-05 Periodic Re-evaluation Scheduler',
-          startedAt: startTime,
-          completedAt: new Date().toISOString(),
-          status: 'success',
-          steps,
-          summary: `Se procesaron proveedores vencidos. Se crearon ${res.assessmentsCreated} nuevas evaluaciones con links firmados.`
-        };
-        break;
-      }
-
-      case 'wf-06': {
-        // Alerts
-        const alert = this.dispatchAlert({
-          severity: 'high',
-          title: 'Manual Alert Test via n8n WF-06 Trigger',
-          source: 'manual_trigger',
-          source_ref: 'test-' + Date.now().toString(36),
-          description: 'Esta alerta fue disparada como prueba de verificación de canal Slack y correo electrónico.'
-        });
-
-        const steps = [
-          { nodeId: 'webhook', nodeName: 'Webhook Alert Received', status: 'success' as const, durationMs: 12, outputPreview: `Header auth valid, payload parsed` },
-          { nodeId: 'normalize', nodeName: 'Normalize & Route', status: 'success' as const, durationMs: 14, outputPreview: `Severity: ${alert.severity}, Route: ${alert.route}` },
-          { nodeId: 'redis-get', nodeName: 'Check Dedupe in Redis', status: 'success' as const, durationMs: 22, outputPreview: `Fingerprint checked: ${alert.status}` },
-          { nodeId: 'slack', nodeName: 'Post to Slack Webhook', status: 'success' as const, durationMs: 120, outputPreview: 'Block Kit formatted payload sent' },
-          { nodeId: 'email', nodeName: 'Send SMTP Email', status: 'success' as const, durationMs: 190, outputPreview: 'HTML template sent to RBAC users' }
-        ];
-
-        runLog = {
-          id: runId,
-          workflowId,
-          workflowName: 'WF-06 Multi-Channel Alert Dispatcher',
-          startedAt: startTime,
-          completedAt: new Date().toISOString(),
-          status: 'success',
-          steps,
-          summary: `Alerta procesada con éxito (Ruta: ${alert.route}). Dedupe status: ${alert.status}.`
-        };
-        break;
-      }
-
-      case 'wf-07': {
-        // Scorecard refresh
-        const res = this.recalculateAllScorecards();
-        const steps = [
-          { nodeId: 'cron', nodeName: 'Cron 1h', status: 'success' as const, durationMs: 10, outputPreview: 'Hourly refresh trigger' },
-          { nodeId: 'pg-vendors', nodeName: 'Get Active Vendors', status: 'success' as const, durationMs: 28, outputPreview: `Found ${res.refreshed} active vendors` },
-          { nodeId: 'backend-recalc', nodeName: 'Call Backend /scorecard/recalc', status: 'success' as const, durationMs: 310, outputPreview: 'All scores recalculated' },
-          { nodeId: 'log-run', nodeName: 'Log Run to monitoring_jobs', status: 'success' as const, durationMs: 32, outputPreview: 'Updated score history table' }
-        ];
-
-        runLog = {
-          id: runId,
-          workflowId,
-          workflowName: 'WF-07 Scorecard Refresh Engine',
-          startedAt: startTime,
-          completedAt: new Date().toISOString(),
-          status: 'success',
-          steps,
-          summary: `Recálculo general completado: ${res.refreshed} scorecards actualizados.`
-        };
-        break;
-      }
-
-      case 'wf-08': {
-        // Health check
-        const steps = [
-          { nodeId: 'cron', nodeName: 'Cron 30m', status: 'success' as const, durationMs: 8, outputPreview: 'Deadman interval check' },
-          { nodeId: 'pg-jobs', nodeName: 'Inspect monitoring_jobs', status: 'success' as const, durationMs: 32, outputPreview: `${this.monitoringJobs.length} jobs checked` },
-          { nodeId: 'http-health', nodeName: 'Ping Backend /health', status: 'success' as const, durationMs: 45, outputPreview: 'HTTP 200 OK (latency: 18ms)' },
-          { nodeId: 'check-overdue', nodeName: 'Evaluate Stalled Runs', status: 'success' as const, durationMs: 15, outputPreview: '0 overdue jobs detected' }
-        ];
-
-        this.updateJobMeta('health_check', { backend_status: 'online', healthy_jobs: this.monitoringJobs.length, overdue: 0 });
-        runLog = {
-          id: runId,
-          workflowId,
-          workflowName: 'WF-08 Health Check & Deadman Monitor',
-          startedAt: startTime,
-          completedAt: new Date().toISOString(),
-          status: 'success',
-          steps,
-          summary: 'Todos los servicios operacionales. Backend saludable y sin trabajos atrasados.'
-        };
-        break;
-      }
-
-      case 'wf-09': {
-        // Weekly digest
-        const steps = [
-          { nodeId: 'cron', nodeName: 'Cron Monday 08:00', status: 'success' as const, durationMs: 10, outputPreview: 'Triggered weekly cadence' },
-          { nodeId: 'pg-summary', nodeName: 'Query Open Findings & Risks', status: 'success' as const, durationMs: 44, outputPreview: `Aggregated findings across all vendors` },
-          { nodeId: 'generate-html', nodeName: 'Render Digest Template', status: 'success' as const, durationMs: 30, outputPreview: 'Prepared executive summary' },
-          { nodeId: 'send-bcc', nodeName: 'Send Email via BCC', status: 'success' as const, durationMs: 180, outputPreview: 'Dispatched to 3 security roles' }
-        ];
-
-        this.updateJobMeta('weekly_digest', { dispatched_at: new Date().toISOString(), recipients_count: 3 });
-        runLog = {
-          id: runId,
-          workflowId,
-          workflowName: 'WF-09 Weekly VRM Digest Generator',
-          startedAt: startTime,
-          completedAt: new Date().toISOString(),
-          status: 'success',
-          steps,
-          summary: 'Resumen semanal compilado y enviado a los responsables de riesgo y auditoría.'
-        };
-        break;
-      }
-
-      case 'wf-10': {
-        // Cleanup & archive
-        const res = this.runCleanupAndArchive(90, 1);
-        const steps = [
-          { nodeId: 'cron', nodeName: 'Cron Daily 03:00', status: 'success' as const, durationMs: 12, outputPreview: 'Maintenance schedule triggered' },
-          { nodeId: 'close-stale', nodeName: 'Close Stale Findings (>90d)', status: 'success' as const, durationMs: 40, outputPreview: `Closed ${res.closedFindings} findings` },
-          { nodeId: 'archive-audit', nodeName: 'Move Old Audit to Archive (>1y)', status: 'success' as const, durationMs: 65, outputPreview: `Archived ${res.archivedAudit} log entries` },
-          { nodeId: 'purge-scores', nodeName: 'Prune Score History', status: 'success' as const, durationMs: 35, outputPreview: `Purged ${res.purgedScores} expired snapshots` }
-        ];
-
-        runLog = {
-          id: runId,
-          workflowId,
-          workflowName: 'WF-10 Cleanup & Compliance Archiver',
-          startedAt: startTime,
-          completedAt: new Date().toISOString(),
-          status: 'success',
-          steps,
-          summary: `Limpieza completada: ${res.closedFindings} hallazgos cerrados, ${res.archivedAudit} registros archivados.`
-        };
-        break;
-      }
-
-      default: {
-        // WF-00 or fallback
-        const steps = [
-          { nodeId: 'err-trigger', nodeName: 'Error Trigger Handler', status: 'success' as const, durationMs: 10, outputPreview: 'Captured simulated error event' },
-          { nodeId: 'log-deadletter', nodeName: 'Log Dead-Letter Queue', status: 'success' as const, durationMs: 25, outputPreview: 'Stored diagnostic trace' },
-          { nodeId: 'alert-relay', nodeName: 'Forward to WF-06', status: 'success' as const, durationMs: 40, outputPreview: 'Dispatched incident notification' }
-        ];
-        runLog = {
-          id: runId,
-          workflowId: 'wf-00',
-          workflowName: 'WF-00 Global Error Handler',
-          startedAt: startTime,
-          completedAt: new Date().toISOString(),
-          status: 'success',
-          steps,
-          summary: 'Manejador global de errores verificado. Listo para capturar fallos no capturados.'
-        };
-      }
-    }
-
-    this.workflowLogs.unshift(runLog);
-    if (this.workflowLogs.length > 30) this.workflowLogs.pop();
+    const startedAt = new Date().toISOString();
+    const response = await apiRequest<{ status: string; workflowCode: string }>(
+      `/api/workflows/${encodeURIComponent(workflowId)}/execute`,
+      { method: 'POST', body: {} }
+    );
+    const entry: WorkflowRunLog = {
+      id: createId(), workflowId, workflowName: workflowId.toUpperCase(),
+      startedAt, completedAt: new Date().toISOString(), status: 'success', steps: [],
+      summary: response.status === 'accepted'
+        ? 'La solicitud de ejecución fue enviada a n8n.'
+        : 'Solicitud aceptada.'
+    };
+    this.workflowLogs.unshift(entry);
     this.notify();
-    return runLog;
+    return entry;
   }
 }
 
