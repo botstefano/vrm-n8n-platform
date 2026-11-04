@@ -2,7 +2,7 @@
 
 Esta versión separa el frontend estático y la API privada. El frontend usa Supabase Auth para iniciar sesión; las operaciones de negocio pasan por Express, que valida el JWT y el rol del usuario antes de consultar PostgreSQL.
 
-El pipeline CI compila el frontend, comprueba la sintaxis de Express y valida los 11 workflows n8n. En los pushes a `feature/supabase-integration`, también sincroniza `package-lock.json` con las dependencias declaradas.
+El pipeline CI compila el frontend, comprueba la sintaxis de Express y valida los 11 workflows n8n. La instalación de dependencias en CI utiliza `npm ci`, por lo que comprueba que `package-lock.json` esté sincronizado sin otorgar permisos de escritura al workflow.
 
 ## 1. Servicios en Render
 
