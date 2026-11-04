@@ -15,11 +15,20 @@ import { AlertsView } from './components/AlertsView';
 import { HealthView } from './components/HealthView';
 import { AuditView } from './components/AuditView';
 import { LoginView } from './components/LoginView';
+import { AssessmentPortalView } from './components/AssessmentPortalView';
 import { setApiAccessToken, isApiConfigured } from './services/api';
 import { isSupabaseConfigured, supabase } from './services/supabase';
 import { CheckCircle2, AlertOctagon, Loader2 } from 'lucide-react';
 
+function getPublicAssessmentToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.pathname.match(/^\/portal\/assessment\/([^/]+)\/?$/);
+  if (!match) return null;
+  try { return decodeURIComponent(match[1]); } catch { return null; }
+}
+
 export function App() {
+  const publicAssessmentToken = getPublicAssessmentToken();
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -86,6 +95,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (publicAssessmentToken) return;
     if (!session?.access_token) {
       setApiAccessToken(null);
       setCurrentUser(null);
@@ -122,7 +132,7 @@ export function App() {
       window.removeEventListener('vrm-api-error', onApiError);
       setApiAccessToken(null);
     };
-  }, [session?.access_token]);
+  }, [session?.access_token, publicAssessmentToken]);
 
   const handleLogin = async (email: string, password: string) => {
     setLoginLoading(true);
@@ -170,6 +180,10 @@ export function App() {
       setIsExecuting(false);
     }
   };
+
+  if (publicAssessmentToken) {
+    return <AssessmentPortalView token={publicAssessmentToken} />;
+  }
 
   if (authLoading) {
     return (
