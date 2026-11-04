@@ -285,7 +285,7 @@ export function App() {
         {currentTab === 'health' && (
           <HealthView jobs={jobs} onExecuteWorkflow={handleExecuteWorkflow} isExecuting={isExecuting} />
         )}
-        {currentTab === 'audit' && <AuditView auditLog={auditLog} auditArchive={auditArchive} />}
+        {currentTab === 'audit' && <AuditView auditLog={auditLog} auditArchive={auditArchive} onExecuteWorkflow={handleExecuteWorkflow} />}
       </main>
 
       <footer className="border-t border-slate-900 bg-slate-950 py-4 mt-auto">
