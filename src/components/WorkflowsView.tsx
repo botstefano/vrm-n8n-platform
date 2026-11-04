@@ -26,6 +26,23 @@ import {
 import { WORKFLOWS_REGISTRY } from '../data/seedData';
 import { WorkflowSummary, MonitoringJob } from '../types';
 import { store, WorkflowRunLog } from '../services/store';
+import wf00 from '../../automation/n8n/workflows/wf-00-global-error-handler.json';
+import wf01 from '../../automation/n8n/workflows/wf-01-nvd-cve.json';
+import wf02 from '../../automation/n8n/workflows/wf-02-ct-logs.json';
+import wf03 from '../../automation/n8n/workflows/wf-03-tls-expiry.json';
+import wf04 from '../../automation/n8n/workflows/wf-04-attack-surface.json';
+import wf05 from '../../automation/n8n/workflows/wf-05-reevaluation.json';
+import wf06 from '../../automation/n8n/workflows/wf-06-alerts.json';
+import wf07 from '../../automation/n8n/workflows/wf-07-scorecard-refresh.json';
+import wf08 from '../../automation/n8n/workflows/wf-08-health-check.json';
+import wf09 from '../../automation/n8n/workflows/wf-09-weekly-digest.json';
+import wf10 from '../../automation/n8n/workflows/wf-10-cleanup-archive.json';
+
+const WORKFLOW_DEFINITIONS: Record<string, unknown> = {
+  'wf-00': wf00, 'wf-01': wf01, 'wf-02': wf02, 'wf-03': wf03,
+  'wf-04': wf04, 'wf-05': wf05, 'wf-06': wf06, 'wf-07': wf07,
+  'wf-08': wf08, 'wf-09': wf09, 'wf-10': wf10
+};
 
 interface WorkflowsViewProps {
   jobs: MonitoringJob[];
@@ -148,27 +165,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
   };
 
   const getWorkflowJsonSnippet = (wf: WorkflowSummary) => {
-    return JSON.stringify(
-      {
-        name: wf.name,
-        code: wf.code,
-        trigger: wf.trigger,
-        schedule: wf.scheduleDescription,
-        description: wf.description,
-        job_type: wf.jobType || null,
-        nodes_pipeline: getPipelineNodes(wf.id),
-        environment_dependencies: [
-          'POSTGRES_DB',
-          'REDIS_VRM',
-          'N8N_WEBHOOK_SECRET',
-          'PORTAL_TOKEN_SECRET',
-          'VRM_BACKEND_URL',
-          'NVD_MIN_CVSS'
-        ]
-      },
-      null,
-      2
-    );
+    return JSON.stringify(WORKFLOW_DEFINITIONS[wf.id] || {}, null, 2);
   };
 
   return (
@@ -323,7 +320,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Esquema n8n JSON
+                JSON real de n8n
               </button>
             </div>
 
@@ -468,7 +465,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
               <div className="space-y-2 pt-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-slate-400">
-                    Definición JSON compatible con n8n import API (/automation/n8n/workflows/):
+                    Archivo JSON real del workflow, listo para importar o actualizar en n8n:
                   </span>
                   <button
                     onClick={() => {
