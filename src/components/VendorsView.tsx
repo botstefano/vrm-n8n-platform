@@ -477,8 +477,8 @@ export const VendorsView: React.FC<VendorsViewProps> = ({
               )}
             </div>
 
-            {canWrite && (
             {/* Add Tech Form */}
+            {canWrite && (
             <form onSubmit={handleAddTechnology} className="pt-2 flex flex-wrap gap-2 items-center">
               <input
                 type="text"
