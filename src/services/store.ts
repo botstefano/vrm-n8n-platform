@@ -261,9 +261,7 @@ class VrmStore {
     if (f) {
       f.status = status;
       if (resolution) f.resolution = resolution;
-      if (status === 'closed') {
-        f.closed_at = new Date().toISOString();
-      }
+      f.closed_at = status === 'closed' ? new Date().toISOString() : null;
       this.remote(apiRequest(`/api/findings/${id}`, { method: 'PATCH', body: { status, resolution, due_date: f.due_date } }));
       this.notify();
     }
