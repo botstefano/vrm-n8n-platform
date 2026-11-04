@@ -75,7 +75,7 @@
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ workflow: $('Build Payload').first().json.workflow, execution_id: $('Build Payload').first().json.execution_id, node: $('Build Payload').first().json.node, error: $('Build Payload').first().json.message }) }}",
+        "jsonBody": "={{ JSON.stringify({ workflow: $('Build Payload').first().json.workflow, workflow_id: $('Build Payload').first().json.workflow_id, execution_id: $('Build Payload').first().json.execution_id, execution_url: $('Build Payload').first().json.execution_url, node: $('Build Payload').first().json.node, message: $('Build Payload').first().json.message }) }}",
         "options": {
           "timeout": 10000
         }
