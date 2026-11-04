@@ -471,7 +471,7 @@ app.post('/api/v1/webhooks/n8n/workflow-completed', requireDatabase, verifyN8nSi
     if (!['success','partial','failed'].includes(status)) return res.status(400).json({ error: 'status debe ser success, partial o failed.' });
 
     const { data: current, error: currentError } = await supabase.from('workflow_execution_logs')
-      .select('id,details,completed_at')
+      .select('id,details,completed_at,status')
       .eq('id', requestId)
       .eq('workflow_code', workflowCode)
       .maybeSingle();
