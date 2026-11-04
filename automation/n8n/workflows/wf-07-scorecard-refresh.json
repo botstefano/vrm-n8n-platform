@@ -211,6 +211,50 @@
           "name": "VRM Alerts Webhook Auth"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst aggregate = $('Aggregate').first().json || {};\nconst total = Number(aggregate.total || 0);\nconst ok = Number(aggregate.ok || 0);\nconst fail = Number(aggregate.fail || 0);\nconst status = fail === 0 ? 'success' : ok === 0 ? 'failed' : 'partial';\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-07',\n  status,\n  summary: 'Scorecards: ' + ok + '/' + total + ' recalculados; ' + fail + ' error(es).',\n  details: { total, ok, fail }\n} }];"
+      },
+      "id": "manual-completion-code-wf-07",
+      "name": "Build Manual Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Signature",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "manual-completion-http-wf-07",
+      "name": "Report Manual Completion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2380,
+        520
+      ],
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -277,6 +321,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -285,6 +336,28 @@
         [
           {
             "node": "Get Active Vendors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Alert": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
             "type": "main",
             "index": 0
           }
