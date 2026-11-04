@@ -110,9 +110,10 @@ function normalizeVendorWebsite(value) {
     error.status = 400;
     throw error;
   }
-  const isIp = net.isIP(url.hostname);
-  if (!['http:','https:'].includes(url.protocol) || !url.hostname ||
-      url.username || url.password || (!isIp && !url.hostname.includes('.'))) {
+  const hostname = url.hostname.replace(/^\\[|\\]$/g, '');
+  const isIp = net.isIP(hostname);
+  if (!['http:','https:'].includes(url.protocol) || !hostname ||
+      url.username || url.password || (!isIp && !hostname.includes('.'))) {
     const error = new Error('La dirección web debe ser un dominio o IP con protocolo HTTP/HTTPS, sin credenciales.');
     error.status = 400;
     throw error;
