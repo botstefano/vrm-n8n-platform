@@ -519,55 +519,18 @@ class VrmStore {
   }
 
   // Cleanup & Archiver (WF-10 logic)
-  public runCleanupAndArchive(staleDays: number = 90, retentionYears: number = 1): {
+  public async runCleanupAndArchive(staleDays: number = 90, retentionYears: number = 5): Promise<{
     closedFindings: number;
     archivedAudit: number;
     purgedScores: number;
-  } {
-    this.remote(apiRequest('/api/cleanup', { method: 'POST', body: { staleDays, retentionYears } }));
-    const staleCutoff = new Date(Date.now() - staleDays * 86400000);
-    let closedCount = 0;
-
-    // 1. Close stale open findings
-    for (const f of this.findings) {
-      if (f.status === 'open' && new Date(f.detected_at) < staleCutoff) {
-        f.status = 'closed';
-        f.resolution = 'auto_closed_stale';
-        f.closed_at = new Date().toISOString();
-        closedCount++;
-      }
-    }
-
-    // 2. Archive older audit log rows
-    const auditCutoff = new Date(Date.now() - retentionYears * 365 * 86400000);
-    const toArchive = this.auditLog.filter((a) => new Date(a.created_at) < auditCutoff);
-    this.auditArchive.push(...toArchive);
-    this.auditLog = this.auditLog.filter((a) => new Date(a.created_at) >= auditCutoff);
-
-    // 3. Purge very old score history
-    const scoreCutoff = new Date(Date.now() - 365 * 86400000);
-    const initialScoreLen = this.scoreHistory.length;
-    this.scoreHistory = this.scoreHistory.filter((sh) => new Date(sh.calculated_at) >= scoreCutoff);
-    const purgedScores = initialScoreLen - this.scoreHistory.length;
-
-    this.updateJobMeta('cleanup_archive', {
-      stale_findings_closed: closedCount,
-      audit_rows_archived: toArchive.length,
-      scores_purged: purgedScores,
-      cleaned_at: new Date().toISOString()
-    });
-
-    this.logAudit('n8n:wf-10-cleanup', 'run_cleanup', 'system', 'wf-10', {
-      closedCount,
-      archivedAudit: toArchive.length
-    });
-
-    this.notify();
-    return {
-      closedFindings: closedCount,
-      archivedAudit: toArchive.length,
-      purgedScores
-    };
+  }> {
+    const result = await apiRequest<{
+      closedFindings: number;
+      archivedAudit: number;
+      purgedScores: number;
+    }>('/api/cleanup', { method: 'POST', body: { staleDays, retentionYears } });
+    await this.hydrateFromApi();
+    return result;
   }
 
   // Update Monitoring Jobs
