@@ -85,6 +85,28 @@ jobs:
                   throw new Error(`${file}: ${builder.name} is not connected to the completion callback`);
                 }
               }
+              // Validate the complete manual execution path, not just isolated callback edges.
+              const reachable = new Set();
+              const pending = ['Manual Trigger'];
+              while (pending.length) {
+                const current = pending.pop();
+                if (reachable.has(current)) continue;
+                reachable.add(current);
+                const outputs = workflow.connections?.[current] || {};
+                for (const connection of Object.values(outputs).flat(2)) pending.push(connection.node);
+              }
+              for (const builder of builders) {
+                if (!reachable.has(builder.name)) {
+                  throw new Error(`${file}: ${builder.name} cannot be reached from Manual Trigger`);
+                }
+              }
+              if (!reachable.has('Report Manual Completion')) {
+                throw new Error(`${file}: Manual Trigger cannot reach Report Manual Completion`);
+              }
+              const completionAuth = reporter.parameters?.headerParameters?.parameters?.find((header) => header.name === 'X-N8N-Signature')?.value;
+              if (!String(completionAuth || '').includes('N8N_WEBHOOK_SECRET')) {
+                throw new Error(`${file}: completion callback must use N8N_WEBHOOK_SECRET`);
+              }
               if (code === 'wf-06') {
                 const alertReporter = nodes.find((node) => node.name === 'Report Alert Delivery');
                 const alertBuilders = nodes.filter((node) => node.name.startsWith('Build Alert Callback'));
