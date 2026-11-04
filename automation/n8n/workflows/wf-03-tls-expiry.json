@@ -42,7 +42,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3
+      "maxTries": 3,
+      "alwaysOutputData": true
     },
     {
       "parameters": {
@@ -267,7 +268,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst summary = $('Probe TLS').all().map(item => item.json).find(item => item.kind === 'summary') || {};\nconst meta = summary.meta || {};\nconst resultStatus = summary.status === 'error' ? 'failed' : summary.status === 'partial' ? 'partial' : 'success';\nconst findings = Number(meta.findings || 0);\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-03',\n  status: resultStatus,\n  summary: 'Escaneo TLS completado: ' + findings + ' hallazgo(s) procesado(s).',\n  details: meta\n} }];"
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst summary = $('Probe TLS').isExecuted\n  ? ($('Probe TLS').all().map(item => item.json).find(item => item.kind === 'summary') || {})\n  : $('Build Empty Summary').first().json;\nconst meta = summary.meta || {};\nconst resultStatus = summary.status === 'error' ? 'failed' : summary.status === 'partial' ? 'partial' : 'success';\nconst findings = Number(meta.findings || 0);\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-03',\n  status: resultStatus,\n  summary: 'Escaneo TLS completado: ' + findings + ' hallazgo(s) procesado(s).',\n  details: meta\n} }];"
       },
       "id": "manual-completion-code-wf-03",
       "name": "Build Manual Completion",
@@ -308,6 +309,52 @@
         520
       ],
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-target",
+              "leftValue": "={{ Boolean($json.id) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-target-wf-03-tls-expiry.json",
+      "name": "IF Has Scan Targets",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  kind: 'summary', job_type: 'tls_expiry', interval_min: 1440, status: 'ok',\n  last_run: new Date().toISOString(),\n  meta: { total: 0, checked: 0, failed: 0, blocked: 0, findings: 0 }\n} }];"
+      },
+      "id": "build-empty-summary-wf-03-tls-expiry.json",
+      "name": "Build Empty Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        520
+      ]
     }
   ],
   "connections": {
@@ -326,7 +373,7 @@
       "main": [
         [
           {
-            "node": "Probe TLS",
+            "node": "IF Has Scan Targets",
             "type": "main",
             "index": 0
           }
@@ -416,6 +463,40 @@
         [
           {
             "node": "Report Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Scan Targets": {
+      "main": [
+        [
+          {
+            "node": "Probe TLS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Empty Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Empty Summary": {
+      "main": [
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Manual Completion",
             "type": "main",
             "index": 0
           }
