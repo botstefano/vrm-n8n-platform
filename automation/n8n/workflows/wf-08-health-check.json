@@ -49,7 +49,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT DISTINCT ON (job_type) job_type, last_run, status\nFROM monitoring_jobs\nORDER BY job_type, last_run DESC NULLS LAST, id DESC;",
+        "query": "WITH expected(job_type) AS (\n  VALUES ('nvd'), ('ct_log'), ('tls_expiry'), ('shodan'), ('scorecard_refresh_all'), ('cleanup_archive')\n), latest AS (\n  SELECT DISTINCT ON (job_type) job_type, last_run, status\n  FROM monitoring_jobs\n  ORDER BY job_type, last_run DESC NULLS LAST, id DESC\n)\nSELECT e.job_type, latest.last_run, latest.status\nFROM expected e\nLEFT JOIN latest USING (job_type)\nORDER BY e.job_type;",
         "options": {}
       },
       "id": "pg-jobs",
@@ -182,6 +182,50 @@
           "name": "VRM Alerts Webhook Auth"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst result = $('Detect Problems').first().json || {};\nconst problems = Array.isArray(result.problems) ? result.problems : [];\nconst status = result.backend_down ? 'failed' : problems.length ? 'partial' : 'success';\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-08',\n  status,\n  summary: problems.length ? 'Health check detectó ' + problems.length + ' problema(s).' : 'Health check sin incidencias.',\n  details: { healthy: Boolean(result.healthy), backend_down: Boolean(result.backend_down), problems }\n} }];"
+      },
+      "id": "manual-completion-code-wf-08",
+      "name": "Build Manual Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Signature",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "manual-completion-http-wf-08",
+      "name": "Report Manual Completion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2380,
+        520
+      ],
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -252,6 +296,39 @@
         [
           {
             "node": "Backend Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Unhealthy": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Healthy": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
             "type": "main",
             "index": 0
           }
