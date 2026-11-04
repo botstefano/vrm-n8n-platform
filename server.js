@@ -647,7 +647,7 @@ app.patch('/api/findings/:id', allowRoles('admin','risk_analyst'), async (req, r
   } catch (error) { next(error); }
 });
 
-app.post('/api/scorecards/recalculate/:vendorId', allowRoles('admin','risk_analyst','auditor'), async (req, res, next) => {
+app.post('/api/scorecards/recalculate/:vendorId', allowRoles('admin','risk_analyst'), async (req, res, next) => {
   try { res.json(await recalculateVendorScore(req.params.vendorId)); }
   catch (error) { next(error); }
 });
