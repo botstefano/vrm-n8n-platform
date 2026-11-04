@@ -92,6 +92,22 @@ if (attack.nodes.some((node) => node.type === 'n8n-nodes-base.code' &&
   throw new Error('WF-04 cannot import Node modules in n8n Cloud.');
 }
 
+const nvd = readWorkflow('wf-01-nvd-cve.json');
+const nvdRequest = nvd.nodes.find((node) => node.name === 'NVD Query');
+if (!nvdRequest ||
+    nvdRequest.credentials?.httpHeaderAuth?.name !== 'NVD API' ||
+    nvdRequest.parameters?.genericAuthType !== 'httpHeaderAuth') {
+  throw new Error('WF-01 must use the NVD API Header Auth credential.');
+}
+
+const shodan = readWorkflow('wf-04-attack-surface.json');
+const shodanRequest = shodan.nodes.find((node) => node.name === 'Shodan Host');
+if (!shodanRequest ||
+    shodanRequest.credentials?.httpQueryAuth?.name !== 'Shodan API' ||
+    shodanRequest.parameters?.genericAuthType !== 'httpQueryAuth') {
+  throw new Error('WF-04 must use the Shodan API Query Auth credential.');
+}
+
 const reevaluation = readWorkflow('wf-05-reevaluation.json');
 const signer = reevaluation.nodes.find((node) => node.name === 'Sign Portal Link');
 if (!signer || !String(signer.parameters?.url || '').includes('/assessment-link')) {

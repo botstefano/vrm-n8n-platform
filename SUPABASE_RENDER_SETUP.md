@@ -93,7 +93,7 @@ La rama incorpora workflows compatibles con n8n Cloud. Importa o actualiza los 1
 1. **Postgres VRM** — credencial PostgreSQL que apunte a la base Supabase. Usa los datos de Connect de Supabase. Si n8n Cloud no alcanza el host Direct, utiliza Session Pooler y el host/puerto proporcionados por Supabase.
 2. **VRM Alerts Webhook Auth** — tipo Header Auth; nombre del header `X-Alert-Token`; valor idéntico a `ALERTS_WEBHOOK_TOKEN` configurado en Render. Así se protegen los webhooks entrantes y los disparadores manuales.
 3. **VRM Backend Callback Auth** — tipo Header Auth; nombre del header `X-N8N-Signature`; valor idéntico a `N8N_WEBHOOK_SECRET` configurado en Render. Así se autentican los callbacks y las llamadas internas a la API.
-4. **NVD API** — credencial de API Key requerida por el nodo NVD.
+4. **NVD API** — credencial **Header Auth**; nombre del header `apiKey`; valor: tu clave de NVD. El nodo NVD la envía como encabezado HTTP.
 5. **Shodan API** — credencial HTTP Query Auth con el parámetro `key` y tu API key de Shodan.
 6. **SMTP VRM** — servidor SMTP y remitente para invitaciones y resúmenes.
 
