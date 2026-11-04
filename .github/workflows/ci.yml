@@ -23,5 +23,25 @@ jobs:
         run: npm run build
       - name: Check Express API JavaScript syntax
         run: node --check server.js
-      - name: Validate n8n workflow JSON
-        run: node -e "const fs=require('fs'); for (const f of fs.readdirSync('automation/n8n/workflows').filter(x=>x.endsWith('.json'))) JSON.parse(fs.readFileSync('automation/n8n/workflows/'+f,'utf8')); console.log('All n8n workflow JSON files are valid.');"
+      - name: Validate n8n workflows and Code node JavaScript
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'automation/n8n/workflows';
+          let workflowCount = 0;
+          let codeNodeCount = 0;
+          for (const file of fs.readdirSync(path).filter((name) => name.endsWith('.json'))) {
+            const workflow = JSON.parse(fs.readFileSync(`${path}/${file}`, 'utf8'));
+            workflowCount += 1;
+            for (const node of workflow.nodes || []) {
+              if (node.type !== 'n8n-nodes-base.code') continue;
+              try {
+                new Function(node.parameters?.jsCode || '');
+                codeNodeCount += 1;
+              } catch (error) {
+                throw new Error(`${file} / ${node.name}: ${error.message}`);
+              }
+            }
+          }
+          console.log(`Validated ${workflowCount} workflow JSON files and ${codeNodeCount} Code node scripts.`);
+          NODE
