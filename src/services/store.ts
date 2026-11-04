@@ -393,10 +393,19 @@ class VrmStore {
   // Manual runs are delegated to n8n; no simulated successful workflow runs.
   public async executeWorkflow(workflowId: string): Promise<WorkflowRunLog> {
     const startedAt = new Date().toISOString();
-    const response = await apiRequest<{ status: string; workflowCode: string; requestId: string }>(
-      `/api/workflows/${encodeURIComponent(workflowId)}/execute`,
-      { method: 'POST', body: {} }
-    );
+    let response: { status: string; workflowCode: string; requestId: string };
+    try {
+      response = await apiRequest<{ status: string; workflowCode: string; requestId: string }>(
+        `/api/workflows/${encodeURIComponent(workflowId)}/execute`,
+        { method: 'POST', body: {} }
+      );
+    } catch (error) {
+      // The API may have persisted a failed run before returning an HTTP error from n8n.
+      try { await this.hydrateWorkflowLogs(); } catch (refreshError) {
+        console.error('No se pudo actualizar el historial después del fallo:', refreshError);
+      }
+      throw error;
+    }
     try {
       await this.hydrateWorkflowLogs();
       const saved = this.workflowLogs.find((log) => log.id === response.requestId);
