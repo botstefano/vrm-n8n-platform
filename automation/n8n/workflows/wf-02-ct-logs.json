@@ -305,6 +305,30 @@
         }
       },
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vrm-manual/wf-02",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "manual-webhook",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        520
+      ],
+      "webhookId": "vrm-manual-wf-02",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "httpHeaderAlerts",
+          "name": "VRM Alerts Webhook Auth"
+        }
+      }
     }
   ],
   "connections": {
@@ -408,6 +432,17 @@
         [
           {
             "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Vendors",
             "type": "main",
             "index": 0
           }
