@@ -298,6 +298,72 @@ async function dispatchAlertRecord(payload, reqUser = null) {
   return { ...data, status: data.delivery_status, timestamp: data.created_at, vendor_name: null, email_subject: null, email_html: null, slack_text: null };
 }
 
+// Portal público de proveedores: acceso únicamente mediante enlace HMAC firmado, vigente y de un solo uso.
+app.get('/api/public/assessments/:token', requireDatabase, async (req, res, next) => {
+  try {
+    const { assessment, vendor, questionnaire } = await loadPublicAssessment(req.params.token);
+    res.json({
+      vendor: { id: vendor.id, legal_name: vendor.legal_name },
+      assessment: { id: assessment.id, status: assessment.status, token_expires_at: assessment.token_expires_at },
+      questionnaire: {
+        id: questionnaire.id,
+        name: questionnaire.name,
+        version: questionnaire.version,
+        sections: questionnaire.definition?.sections || []
+      }
+    });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/public/assessments/:token/complete', requireDatabase, async (req, res, next) => {
+  try {
+    const { assessment, vendor, questionnaire } = await loadPublicAssessment(req.params.token);
+    const responses = req.body?.responses;
+    if (!responses || typeof responses !== 'object' || Array.isArray(responses)) {
+      return res.status(400).json({ error: 'Debes enviar las respuestas del cuestionario.' });
+    }
+    const questions = (questionnaire.definition?.sections || []).flatMap((section) => section.questions || []);
+    if (!questions.length) return res.status(409).json({ error: 'El cuestionario no contiene preguntas configuradas.' });
+    for (const question of questions) {
+      if (typeof responses[question.id] !== 'boolean') {
+        return res.status(400).json({ error: 'Responde todas las preguntas antes de enviar la evaluación.' });
+      }
+    }
+    const totalWeight = questions.reduce((sum, question) => sum + Math.max(0, Number(question.weight) || 0), 0);
+    if (totalWeight <= 0) return res.status(409).json({ error: 'El cuestionario no tiene ponderaciones válidas.' });
+    const earnedWeight = questions.reduce((sum, question) =>
+      sum + (responses[question.id] === true ? Math.max(0, Number(question.weight) || 0) : 0), 0);
+    const score = Math.round((earnedWeight / totalWeight) * 1000) / 10;
+    const tokenHash = crypto.createHash('sha256').update(req.params.token).digest('hex');
+    const { data: saved, error } = await supabase.from('assessments').update({
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      submitted_at: new Date().toISOString(),
+      score,
+      responses,
+      portal_token_hash: null,
+      token_expires_at: null
+    }).eq('id', assessment.id).eq('portal_token_hash', tokenHash)
+      .in('status', ['pending','in_progress']).select().maybeSingle();
+    if (error) throw error;
+    if (!saved) return res.status(409).json({ error: 'La evaluación ya fue enviada o el enlace fue utilizado.' });
+
+    await supabase.from('vendors').update({
+      status: score >= 75 ? 'approved' : 'conditional'
+    }).eq('id', vendor.id).eq('status', 'reevaluation');
+    const { error: auditError } = await supabase.from('audit_log').insert({
+      actor: 'vendor_portal',
+      action: 'vendor_assessment_submitted',
+      entity: 'assessments',
+      entity_id: assessment.id,
+      details: { vendor_id: vendor.id, score }
+    });
+    if (auditError) throw auditError;
+    await recalculateVendorScore(vendor.id);
+    res.json({ completed: true, score, message: 'La evaluación fue registrada correctamente.' });
+  } catch (error) { next(error); }
+});
+
 // Webhooks privados para llamadas salientes desde n8n. Se validan con secreto compartido.
 app.post('/api/v1/scorecard/recalc/:vendorId', requireDatabase, verifyN8nSignature, async (req, res, next) => {
   try {
