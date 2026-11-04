@@ -39,6 +39,7 @@ Variables de entorno de la API:
 |---|---|
 | `SUPABASE_URL` | Project URL de Supabase |
 | `SUPABASE_SECRET_KEY` | Secret key del proyecto Supabase |
+| `PORTAL_TOKEN_SECRET` | Secreto aleatorio fuerte para firmar y verificar enlaces HMAC de evaluación |
 | `VRM_FRONTEND_URL` | Origen exacto del Static Site, sin barra final |
 | `N8N_WEBHOOK_SECRET` | Secreto compartido para verificar callbacks de n8n |
 | `N8N_BASE_URL` | URL base de n8n, sin `/webhook/vrm-alerts` |
@@ -71,12 +72,13 @@ Crea/configura en n8n:
 
 1. Credencial PostgreSQL llamada `Postgres VRM`, apuntando a la base PostgreSQL del proyecto Supabase. Usa los datos de conexión que entrega el botón Connect de Supabase. Si el host Direct no es accesible desde el entorno de n8n, utiliza Session Pooler y la cadena/puerto que proporciona Supabase.
 2. Credencial de Header Auth llamada `VRM Alerts Webhook Auth`, con el mismo valor que `ALERTS_WEBHOOK_TOKEN` y el nombre de header que el workflow WF-06 espera (`X-Alert-Token`).
-3. Configura las credenciales referenciadas por los nodos de NVD, Shodan, Redis y SMTP.
-4. Configura en el entorno de n8n `N8N_WEBHOOK_SECRET`, `VRM_BACKEND_URL`, `N8N_BASE_URL` y las demás variables que utilicen los workflows. `N8N_WEBHOOK_SECRET` debe coincidir con el valor de Render y n8n lo envía al backend en `X-N8N-Signature`.
+3. Configura las credenciales referenciadas por los nodos de NVD, Shodan, Redis y SMTP. Para WF-05, configura `SMTP VRM` y `SMTP_FROM`; el nodo de invitación solo envía correo cuando el proveedor tiene un email de contacto.
+4. Configura en el entorno de n8n `N8N_WEBHOOK_SECRET`, `PORTAL_TOKEN_SECRET`, `VRM_PORTAL_URL`, `VRM_BACKEND_URL`, `N8N_BASE_URL`, `SMTP_FROM` y las demás variables que utilicen los workflows. `N8N_WEBHOOK_SECRET` debe coincidir con el valor de Render y n8n lo envía al backend en `X-N8N-Signature`. `PORTAL_TOKEN_SECRET` debe coincidir exactamente entre n8n y la API de Render. `VRM_PORTAL_URL` debe ser la URL pública del frontend terminada en `/portal`.
 
 En Render:
 
 - `N8N_BASE_URL`: URL base de tu instancia n8n.
+- `PORTAL_TOKEN_SECRET`: usa el mismo valor secreto que configuraste en n8n para firmar los enlaces del portal.
 - `N8N_MANUAL_WEBHOOK_BASE_URL`: por ejemplo `https://tu-n8n.example.com/webhook/vrm-manual` (sustituye por la URL real).
 - `ALERTS_WEBHOOK_TOKEN`: debe coincidir con la credencial Header Auth de n8n.
 - `N8N_WEBHOOK_SECRET`: debe coincidir con la variable configurada en n8n.
