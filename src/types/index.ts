@@ -136,7 +136,7 @@ export interface AlertNotification {
   source?: string;
   source_ref?: string;
   description?: string;
-  status: 'sent' | 'deduped';
+  status: 'sent' | 'deduped' | 'pending' | 'failed';
   slack_text?: string;
   email_subject?: string;
   email_html?: string;
