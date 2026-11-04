@@ -1,5 +1,5 @@
 {
-  "name": "WF-10 Cleanup & Archive",
+  "name": "WF-09 Weekly Digest",
   "nodes": [
     {
       "parameters": {
@@ -7,13 +7,13 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 3 * * *"
+              "expression": "0 8 * * 1"
             }
           ]
         }
       },
       "id": "cron",
-      "name": "Daily 03:00",
+      "name": "Monday 08:00",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -24,13 +24,11 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH c AS (\n  UPDATE vendor_findings\n     SET status = 'closed'::finding_status, closed_at = now(), resolution = 'auto_closed_stale'\n   WHERE status = 'open' AND due_date < now() - make_interval(days => $1::int)\n  RETURNING id\n) SELECT COUNT(*)::int AS closed_findings FROM c;",
-        "options": {
-          "queryReplacement": "={{ [Number($vars.STALE_FINDING_DAYS || 90)] }}"
-        }
+        "query": "SELECT COUNT(*) FILTER (WHERE current_risk = 'critical') AS critical,\n       COUNT(*) FILTER (WHERE current_risk = 'high') AS high,\n       COUNT(*) FILTER (WHERE current_risk = 'medium') AS medium,\n       COUNT(*) FILTER (WHERE current_risk = 'low') AS low,\n       COUNT(*) FILTER (WHERE current_risk = 'minimal') AS minimal,\n       COUNT(*) AS total\nFROM vendors WHERE status IN ('approved','conditional','monitoring','incident','reevaluation');",
+        "options": {}
       },
-      "id": "pg-close",
-      "name": "Auto-close Stale",
+      "id": "pg-risk",
+      "name": "Risk Summary",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
@@ -47,13 +45,11 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH moved AS (\n  DELETE FROM audit_log WHERE created_at < now() - make_interval(years => $1::int) RETURNING *\n), ins AS (\n  INSERT INTO audit_log_archive SELECT * FROM moved RETURNING 1\n) SELECT COUNT(*)::int AS archived_audit FROM ins;",
-        "options": {
-          "queryReplacement": "={{ [Number($vars.AUDIT_RETENTION_YEARS || 5)] }}"
-        }
+        "query": "SELECT COUNT(*) FILTER (WHERE status = 'open') AS open,\n       COUNT(*) FILTER (WHERE status = 'closed' AND closed_at > now() - INTERVAL '7 days') AS closed_7d,\n       COUNT(*) FILTER (WHERE status = 'open' AND due_date < now()) AS overdue,\n       COUNT(*) FILTER (WHERE status = 'open' AND severity = 'critical') AS critical_open,\n       COUNT(*) FILTER (WHERE detected_at > now() - INTERVAL '7 days') AS new_7d\nFROM vendor_findings;",
+        "options": {}
       },
-      "id": "pg-audit",
-      "name": "Archive Old Audit",
+      "id": "pg-find",
+      "name": "Findings Summary",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
@@ -70,13 +66,11 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH d AS (\n  DELETE FROM score_history WHERE calculated_at < now() - make_interval(years => $1::int) RETURNING 1\n) SELECT COUNT(*)::int AS purged_scores FROM d;",
-        "options": {
-          "queryReplacement": "={{ [Number($vars.SCORE_RETENTION_YEARS || 2)] }}"
-        }
+        "query": "SELECT v.id, v.legal_name, v.current_score, v.current_risk,\n       (SELECT COUNT(*) FROM vendor_findings f WHERE f.vendor_id = v.id AND f.status = 'open') AS open_findings\nFROM vendors v\nWHERE v.current_risk IN ('critical','high')\nORDER BY v.current_score ASC NULLS LAST\nLIMIT 10;",
+        "options": {}
       },
-      "id": "pg-score",
-      "name": "Purge Old Score History",
+      "id": "pg-top",
+      "name": "Top Risk Vendors",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
@@ -88,14 +82,15 @@
           "id": "postgresVrm",
           "name": "Postgres VRM"
         }
-      }
+      },
+      "alwaysOutputData": true
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: {\n  job_type: 'cleanup_archive', interval_min: 1440, status: 'ok',\n  meta: {\n    closed_findings: $('Auto-close Stale').first().json.closed_findings,\n    archived_audit: $('Archive Old Audit').first().json.archived_audit,\n    purged_scores: $('Purge Old Score History').first().json.purged_scores\n  } } }];"
+        "jsCode": "const s = $('Risk Summary').first().json;\nconst f = $('Findings Summary').first().json;\nconst top = $('Top Risk Vendors').all().map(i => i.json).filter(v => v.id);\nconst esc = x => String(x == null ? '' : x).replace(/[&<>\"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst td = 'style=\"padding:6px 10px;border-bottom:1px solid #e5e7eb\"';\nconst rows = top.length\n  ? top.map(v => '<tr><td ' + td + '>' + esc(v.legal_name) + '</td><td ' + td + '>' + esc(v.current_score ?? '-') +\n      '</td><td ' + td + '>' + esc(v.current_risk ?? '-') + '</td><td ' + td + '>' + esc(v.open_findings) + '</td></tr>').join('')\n  : '<tr><td ' + td + ' colspan=\"4\">Sin proveedores de riesgo alto o crítico.</td></tr>';\nconst kpi = (label, val) => '<td style=\"padding:8px 14px;text-align:center\"><div style=\"font-size:22px;font-weight:700\">' +\n  esc(val) + '</div><div style=\"font-size:12px;color:#6b7280\">' + label + '</div></td>';\nconst html = '<div style=\"font-family:Arial,sans-serif;max-width:680px\">' +\n  '<h2>VRM — Resumen semanal</h2>' +\n  '<h3>Proveedores por nivel de riesgo (' + esc(s.total) + ' activos)</h3>' +\n  '<table><tr>' + kpi('Crítico', s.critical) + kpi('Alto', s.high) + kpi('Medio', s.medium) + kpi('Bajo', s.low) + kpi('Mínimo', s.minimal) + '</tr></table>' +\n  '<h3>Hallazgos</h3>' +\n  '<table><tr>' + kpi('Abiertos', f.open) + kpi('Críticos abiertos', f.critical_open) + kpi('Vencidos', f.overdue) +\n  kpi('Nuevos (7d)', f.new_7d) + kpi('Cerrados (7d)', f.closed_7d) + '</tr></table>' +\n  '<h3>Top proveedores de riesgo</h3>' +\n  '<table style=\"border-collapse:collapse;width:100%\"><tr style=\"text-align:left;background:#f3f4f6\"><th ' + td + '>Proveedor</th><th ' + td +\n  '>Score</th><th ' + td + '>Riesgo</th><th ' + td + '>Hallazgos abiertos</th></tr>' + rows + '</table></div>';\nreturn [{ json: { html } }];"
       },
-      "id": "sum",
-      "name": "Summary",
+      "id": "html",
+      "name": "Build Digest HTML",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -106,13 +101,11 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO monitoring_jobs (vendor_id, job_type, last_run, next_run, status, result_meta)\nVALUES (NULL, $1, $5::timestamptz, now() + make_interval(mins => $2::int), $3, $4::jsonb)\nON CONFLICT (job_type) WHERE vendor_id IS NULL\nDO UPDATE SET last_run = EXCLUDED.last_run, next_run = EXCLUDED.next_run,\n              status = EXCLUDED.status, result_meta = EXCLUDED.result_meta;",
-        "options": {
-          "queryReplacement": "={{ [$json.job_type, $json.interval_min, $json.status, JSON.stringify($json.meta || {}), $json.last_run || new Date().toISOString()] }}"
-        }
+        "query": "SELECT COALESCE(array_agg(DISTINCT u.email) FILTER (WHERE u.email IS NOT NULL), ARRAY[]::text[]) AS emails,\n       COUNT(DISTINCT u.email)::int AS count\nFROM users u\nJOIN user_roles ur ON ur.user_id = u.id\nJOIN roles r ON r.id = ur.role_id\nWHERE r.code IN ('admin','risk_analyst','auditor') AND u.is_active = true;",
+        "options": {}
       },
-      "id": "pg-log",
-      "name": "Log Run",
+      "id": "pg-rcpt",
+      "name": "Recipients",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
@@ -125,12 +118,87 @@
           "name": "Postgres VRM"
         }
       },
-      "onError": "continueRegularOutput"
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first()?.json || {};\nconst emails = Array.isArray(row.emails) ? row.emails.filter(Boolean) : [];\nreturn [{ json: { bcc: emails.join(','), count: Number(row.count || emails.length) } }];"
+      },
+      "id": "join",
+      "name": "Join Recipients",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.count }}",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              },
+              "rightValue": 0
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-rcpt",
+      "name": "IF Has Recipients",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $vars.SMTP_FROM }}",
+        "toEmail": "={{ $vars.SMTP_FROM }}",
+        "subject": "=VRM Digest Semanal — {{ $now.toFormat('yyyy-MM-dd') }}",
+        "emailFormat": "html",
+        "html": "={{ $('Build Digest HTML').first().json.html }}",
+        "options": {
+          "bccEmail": "={{ $json.bcc }}"
+        }
+      },
+      "id": "send",
+      "name": "Send Digest",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2140,
+        300
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "smtpVrm",
+          "name": "SMTP VRM"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "vrm-manual/wf-10",
+        "path": "vrm-manual/wf-09",
         "authentication": "headerAuth",
         "responseMode": "onReceived",
         "options": {}
@@ -143,7 +211,7 @@
         220,
         520
       ],
-      "webhookId": "vrm-manual-wf-10",
+      "webhookId": "vrm-manual-wf-09",
       "credentials": {
         "httpHeaderAuth": {
           "id": "httpHeaderAlerts",
@@ -153,9 +221,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst summary = $('Summary').first().json || {};\nconst meta = summary.meta || {};\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-10',\n  status: summary.status === 'error' ? 'failed' : summary.status === 'partial' ? 'partial' : 'success',\n  summary: 'Limpieza completada: ' + Number(meta.closed_findings || 0) + ' hallazgo(s) cerrado(s), ' +\n    Number(meta.archived_audit || 0) + ' evento(s) archivado(s) y ' + Number(meta.purged_scores || 0) + ' score(s) purgado(s).',\n  details: meta\n} }];"
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst recipients = $('Recipients').first().json || {};\nconst count = Number(recipients.count || 0);\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-09',\n  status: count > 0 ? 'success' : 'partial',\n  summary: count > 0 ? 'Digest semanal enviado a ' + count + ' destinatario(s).' : 'No hay destinatarios activos; no se envió el digest.',\n  details: { recipients: count }\n} }];"
       },
-      "id": "manual-completion-code-wf-10",
+      "id": "manual-completion-code-wf-09",
       "name": "Build Manual Completion",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -178,7 +246,7 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
-      "id": "manual-completion-http-wf-10",
+      "id": "manual-completion-http-wf-09",
       "name": "Report Manual Completion",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -196,58 +264,93 @@
     }
   ],
   "connections": {
-    "Daily 03:00": {
+    "Monday 08:00": {
       "main": [
         [
           {
-            "node": "Auto-close Stale",
+            "node": "Risk Summary",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Auto-close Stale": {
+    "Risk Summary": {
       "main": [
         [
           {
-            "node": "Archive Old Audit",
+            "node": "Findings Summary",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Archive Old Audit": {
+    "Findings Summary": {
       "main": [
         [
           {
-            "node": "Purge Old Score History",
+            "node": "Top Risk Vendors",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Purge Old Score History": {
+    "Top Risk Vendors": {
       "main": [
         [
           {
-            "node": "Summary",
+            "node": "Build Digest HTML",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Summary": {
+    "Build Digest HTML": {
       "main": [
         [
           {
-            "node": "Log Run",
+            "node": "Recipients",
             "type": "main",
             "index": 0
-          },
+          }
+        ]
+      ]
+    },
+    "Recipients": {
+      "main": [
+        [
+          {
+            "node": "Join Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Join Recipients": {
+      "main": [
+        [
+          {
+            "node": "IF Has Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Recipients": {
+      "main": [
+        [
+          {
+            "node": "Send Digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
           {
             "node": "Build Manual Completion",
             "type": "main",
@@ -260,7 +363,18 @@
       "main": [
         [
           {
-            "node": "Auto-close Stale",
+            "node": "Risk Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Digest": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion",
             "type": "main",
             "index": 0
           }
@@ -287,7 +401,10 @@
   "pinData": {},
   "tags": [
     {
-      "name": "cleanup"
+      "name": "reports"
+    },
+    {
+      "name": "digest"
     }
   ]
 }

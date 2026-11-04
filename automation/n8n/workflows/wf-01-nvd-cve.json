@@ -1,5 +1,5 @@
 {
-  "name": "WF-02 CT Logs (crt.sh)",
+  "name": "WF-01 NVD CVE Monitoring",
   "nodes": [
     {
       "parameters": {
@@ -7,13 +7,13 @@
           "interval": [
             {
               "field": "hours",
-              "hoursInterval": 24
+              "hoursInterval": 6
             }
           ]
         }
       },
       "id": "cron",
-      "name": "Cron 24h",
+      "name": "Cron 6h",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -24,15 +24,36 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT id, legal_name, website FROM vendors WHERE status IN ('approved','conditional','monitoring','incident','reevaluation') AND website IS NOT NULL;",
+        "query": "SELECT GREATEST(COALESCE(MAX(last_run), now() - INTERVAL '1 day'), now() - INTERVAL '119 days') AS win_start,\n       now() AS win_end\nFROM monitoring_jobs WHERE job_type = 'nvd' AND vendor_id IS NULL;",
         "options": {}
       },
-      "id": "pg-vendors",
-      "name": "Get Vendors",
+      "id": "pg-window",
+      "name": "Get Window",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
         460,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT vt.id, vt.vendor_id, vt.product_name, vt.cpe_match\nFROM vendor_technologies vt\nJOIN vendors v ON v.id = vt.vendor_id\nWHERE vt.is_active AND v.status IN ('approved','conditional','monitoring','incident', 'reevaluation');",
+        "options": {}
+      },
+      "id": "pg-tech",
+      "name": "Get Technologies",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        700,
         300
       ],
       "credentials": {
@@ -45,48 +66,37 @@
     },
     {
       "parameters": {
-        "jsCode": "const items = $input.all().filter(it => it.json && it.json.id && it.json.website);\nconst out = [];\nfor (const it of items) {\n  const v = it.json;\n  try {\n    const u = new URL(/^https?:\\/\\//i.test(v.website) ? v.website : 'https://' + v.website);\n    const domain = u.hostname.replace(/^www\\./i, '').toLowerCase();\n    if (!domain.includes('.')) continue;\n    out.push({ json: { vendor_id: v.id, legal_name: v.legal_name, domain } });\n  } catch (e) { /* URL inválida: se ignora */ }\n}\nif (!out.length) {\n  return [{ json: {\n    kind: 'summary',\n    job_type: 'ct_log',\n    interval_min: 1440,\n    status: 'ok',\n    last_run: new Date().toISOString(),\n    meta: { domains: items.length, ok: 0, failed: 0, findings: 0, invalid_websites: items.length, lookback_days: Number($vars.CT_LOOKBACK_DAYS || 3) }\n  } }];\n}\nreturn out;"
-      },
-      "id": "extract",
-      "name": "Extract Domain",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        700,
-        300
-      ]
-    },
-    {
-      "parameters": {
         "method": "GET",
-        "url": "https://crt.sh/",
+        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendQuery": true,
         "queryParameters": {
           "parameters": [
             {
-              "name": "q",
-              "value": "=%.{{ $json.domain }}"
+              "name": "virtualMatchString",
+              "value": "={{ $json.cpe_match }}"
             },
             {
-              "name": "output",
-              "value": "json"
+              "name": "lastModStartDate",
+              "value": "={{ new Date($('Get Window').first().json.win_start).toISOString().replace('Z', '+00:00') }}"
             },
             {
-              "name": "exclude",
-              "value": "expired"
+              "name": "lastModEndDate",
+              "value": "={{ new Date($('Get Window').first().json.win_end).toISOString().replace('Z', '+00:00') }}"
             },
             {
-              "name": "deduplicate",
-              "value": "Y"
+              "name": "resultsPerPage",
+              "value": "2000"
             }
           ]
         },
         "options": {
-          "timeout": 60000,
+          "timeout": 30000,
           "batching": {
             "batch": {
               "batchSize": 1,
-              "batchInterval": 2000
+              "batchInterval": 6000
             }
           },
           "response": {
@@ -94,28 +104,53 @@
               "fullResponse": true,
               "neverError": true
             }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "startIndex",
+                    "value": "={{ $pageCount * 2000 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.statusCode !== 200 || ($response.body.startIndex + $response.body.resultsPerPage >= $response.body.totalResults) }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 6000
+            }
           }
         }
       },
-      "id": "crt",
-      "name": "crt.sh Query",
+      "id": "nvd",
+      "name": "NVD Query",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         940,
         300
       ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "httpHeaderNvd",
+          "name": "NVD API"
+        }
+      },
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 10000,
+      "waitBetweenTries": 6000,
       "onError": "continueRegularOutput"
     },
     {
       "parameters": {
-        "jsCode": "const LOOKBACK_DAYS = Number($vars.CT_LOOKBACK_DAYS || 3);\nconst cutoff = Date.now() - LOOKBACK_DAYS * 86400000;\nconst SUSPICIOUS = /(^|\\.)(dev|test|stage|staging|uat|admin|vpn|internal|jenkins|git|gitlab|vault)(\\d*)\\./i;\nconst toTs = s => new Date(/Z$|[+-]\\d\\d:?\\d\\d$/.test(s) ? s : s + 'Z').getTime();\nconst items = $input.all();\nconst out = [];\nlet failed = 0, ok = 0;\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json;\n  const v = $('Extract Domain').itemMatching(i).json;\n  if (!resp || resp.statusCode !== 200 || !Array.isArray(resp.body)) { failed++; continue; }\n  ok++;\n  const seen = new Set();\n  const recent = resp.body.filter(c => c.entry_timestamp && toTs(c.entry_timestamp) >= cutoff)\n                          .filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, 25);\n  for (const c of recent) {\n    const names = [...new Set(String(c.name_value || '').split('\\n').map(s => s.trim()).filter(Boolean))];\n    const suspicious = names.filter(n => SUSPICIOUS.test(n + '.'));\n    const issuer = (String(c.issuer_name || '').match(/O=([^,]+)/) || [])[1] || c.issuer_name || 'n/a';\n    out.push({ json: {\n      kind: 'finding', vendor_id: v.vendor_id, source: 'ct_log', source_ref: 'ct:' + c.id,\n      title: ('Nuevo certificado emitido para ' + (c.common_name || v.domain) + ' (' + issuer + ')').slice(0, 300),\n      description: 'Dominios: ' + names.slice(0, 20).join(', ') +\n        (suspicious.length ? ' · Posibles hosts no productivos/administrativos: ' + suspicious.slice(0, 10).join(', ') : ''),\n      severity: suspicious.length ? 'medium' : 'low',\n      evidence: { crtsh_id: c.id, serial: c.serial_number, issuer: c.issuer_name, names: names.slice(0, 50),\n                  not_before: c.not_before, not_after: c.not_after, logged_at: c.entry_timestamp }\n    }});\n  }\n}\nconst findings = out.length;\nout.push({ json: { kind: 'summary', job_type: 'ct_log', interval_min: 1440,\n  status: failed === 0 ? 'ok' : (ok === 0 ? 'error' : 'partial'),\n  meta: { domains: items.length, ok, failed, findings, lookback_days: LOOKBACK_DAYS } } });\nreturn out;"
+        "jsCode": "const MIN = Number($vars.NVD_MIN_CVSS || 7.0);\nconst win = $('Get Window').first().json;\nconst items = $input.all();\nconst seen = new Set();\nconst out = [];\nconst technologyStates = new Map();\nlet belowThreshold = 0;\n\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json;\n  const tech = $('Get Technologies').itemMatching(i).json;\n  const key = String(tech.id || (tech.vendor_id + '|' + tech.cpe_match));\n  const state = technologyStates.get(key) || {\n    tech,\n    totalResults: null,\n    lastEnd: 0,\n    failed: false\n  };\n  technologyStates.set(key, state);\n\n  if (!resp || resp.statusCode !== 200 || !resp.body || !Array.isArray(resp.body.vulnerabilities)) {\n    state.failed = true;\n    continue;\n  }\n\n  const body = resp.body;\n  state.totalResults = Number(body.totalResults ?? body.vulnerabilities.length);\n  state.lastEnd = Number(body.startIndex || 0) + Number(body.resultsPerPage ?? body.vulnerabilities.length);\n\n  for (const entry of body.vulnerabilities) {\n    const cve = entry.cve;\n    if (!cve || cve.vulnStatus === 'Rejected') continue;\n    const m = cve.metrics || {};\n    const metric = (m.cvssMetricV40 || m.cvssMetricV31 || m.cvssMetricV30 || m.cvssMetricV2 || [])[0];\n    const score = metric && metric.cvssData ? Number(metric.cvssData.baseScore) : null;\n    if (score === null || isNaN(score) || score < MIN) { belowThreshold++; continue; }\n    const findingKey = tech.vendor_id + '|' + cve.id;\n    if (seen.has(findingKey)) continue;\n    seen.add(findingKey);\n    const severity = score >= 9 ? 'critical' : score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low';\n    const desc = ((cve.descriptions || []).find(d => d.lang === 'en') || {}).value || 'Sin descripción';\n    out.push({ json: {\n      kind: 'finding', vendor_id: tech.vendor_id, source: 'nvd', source_ref: cve.id,\n      title: (cve.id + ' (CVSS ' + score + ') — ' + (tech.product_name || tech.cpe_match)).slice(0, 300),\n      description: desc.slice(0, 2000), severity,\n      evidence: { cve_id: cve.id, cvss: score, published: cve.published, last_modified: cve.lastModified,\n                  cpe_match: tech.cpe_match,\n                  references: (cve.references || []).slice(0, 5).map(r => r.url) }\n    }});\n  }\n}\n\nlet scanned = 0;\nlet failed = 0;\nfor (const state of technologyStates.values()) {\n  if (state.failed || state.totalResults === null || state.lastEnd < state.totalResults) failed++;\n  else scanned++;\n}\n\nconst findings = out.length;\nout.push({ json: { kind: 'summary', job_type: 'nvd', interval_min: 360,\n  status: failed > 0 ? 'partial' : 'ok',\n  last_run: failed > 0 ? win.win_start : win.win_end,\n  meta: { technologies: technologyStates.size, scanned, failed, findings, below_threshold: belowThreshold,\n          window: [win.win_start, win.win_end], page_size: 2000, max_pages_per_technology: 50 }\n} });\nreturn out;"
       },
       "id": "parse",
-      "name": "Parse Certs",
+      "name": "Parse CVEs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -242,7 +277,7 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "vrm-manual/wf-02",
+        "path": "vrm-manual/wf-01",
         "authentication": "headerAuth",
         "responseMode": "onReceived",
         "options": {}
@@ -255,7 +290,7 @@
         220,
         520
       ],
-      "webhookId": "vrm-manual-wf-02",
+      "webhookId": "vrm-manual-wf-01",
       "credentials": {
         "httpHeaderAuth": {
           "id": "httpHeaderAlerts",
@@ -265,9 +300,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst summary = $('Parse Certs').isExecuted\n  ? ($('Parse Certs').all().map(item => item.json).find(item => item.kind === 'summary') || {})\n  : $('Pass Empty Host Summary').isExecuted\n    ? $('Pass Empty Host Summary').first().json\n    : $('Build Empty Summary').first().json;\nconst meta = summary.meta || {};\nconst resultStatus = summary.status === 'error' ? 'failed' : summary.status === 'partial' ? 'partial' : 'success';\nconst findings = Number(meta.findings || 0);\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-02',\n  status: resultStatus,\n  summary: 'Escaneo Certificate Transparency completado: ' + findings + ' hallazgo(s) procesado(s).',\n  details: meta\n} }];"
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst summary = $('Parse CVEs').isExecuted\n  ? ($('Parse CVEs').all().map(item => item.json).find(item => item.kind === 'summary') || {})\n  : $('Build Empty Summary').first().json;\nconst meta = summary.meta || {};\nconst resultStatus = summary.status === 'error' ? 'failed' : summary.status === 'partial' ? 'partial' : 'success';\nconst findings = Number(meta.findings || 0);\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-01',\n  status: resultStatus,\n  summary: 'Escaneo NVD completado: ' + findings + ' hallazgo(s) procesado(s).',\n  details: meta\n} }];"
       },
-      "id": "manual-completion-code-wf-02",
+      "id": "manual-completion-code-wf-01",
       "name": "Build Manual Completion",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -290,7 +325,7 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
-      "id": "manual-completion-http-wf-02",
+      "id": "manual-completion-http-wf-01",
       "name": "Report Manual Completion",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -318,7 +353,7 @@
           "conditions": [
             {
               "id": "has-target",
-              "leftValue": "={{ Boolean($json.id) }}",
+              "leftValue": "={{ Boolean($json.cpe_match) }}",
               "operator": {
                 "type": "boolean",
                 "operation": "true",
@@ -330,7 +365,7 @@
         },
         "options": {}
       },
-      "id": "if-has-target-wf-02-ct-logs.json",
+      "id": "if-has-target-wf-01-nvd-cve.json",
       "name": "IF Has Scan Targets",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -341,9 +376,9 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: {\n  kind: 'summary', job_type: 'ct_log', interval_min: 1440, status: 'ok',\n  last_run: new Date().toISOString(),\n  meta: { domains: 0, ok: 0, failed: 0, findings: 0, lookback_days: Number($vars.CT_LOOKBACK_DAYS || 3) }\n} }];"
+        "jsCode": "return [{ json: {\n  kind: 'summary', job_type: 'nvd', interval_min: 360, status: 'ok',\n  last_run: $('Get Window').first().json.win_start,\n  meta: { technologies: 0, scanned: 0, failed: 0, findings: 0, below_threshold: 0 }\n} }];"
       },
-      "id": "build-empty-summary-wf-02-ct-logs.json",
+      "id": "build-empty-summary-wf-01-nvd-cve.json",
       "name": "Build Empty Summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -351,67 +386,32 @@
         920,
         520
       ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "has-domain",
-              "leftValue": "={{ Boolean($json.domain) }}",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "if-has-host-wf-02",
-      "name": "IF Has Domains",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        680,
-        520
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "return $input.all();"
-      },
-      "id": "pass-empty-summary-wf-02",
-      "name": "Pass Empty Host Summary",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        920,
-        760
-      ]
     }
   ],
   "connections": {
-    "Cron 24h": {
+    "Cron 6h": {
       "main": [
         [
           {
-            "node": "Get Vendors",
+            "node": "Get Window",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Get Vendors": {
+    "Get Window": {
+      "main": [
+        [
+          {
+            "node": "Get Technologies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Technologies": {
       "main": [
         [
           {
@@ -422,29 +422,18 @@
         ]
       ]
     },
-    "Extract Domain": {
+    "NVD Query": {
       "main": [
         [
           {
-            "node": "IF Has Domains",
+            "node": "Parse CVEs",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "crt.sh Query": {
-      "main": [
-        [
-          {
-            "node": "Parse Certs",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Certs": {
+    "Parse CVEs": {
       "main": [
         [
           {
@@ -498,7 +487,7 @@
       "main": [
         [
           {
-            "node": "Get Vendors",
+            "node": "Get Window",
             "type": "main",
             "index": 0
           }
@@ -520,7 +509,7 @@
       "main": [
         [
           {
-            "node": "Extract Domain",
+            "node": "NVD Query",
             "type": "main",
             "index": 0
           }
@@ -549,40 +538,6 @@
           }
         ]
       ]
-    },
-    "IF Has Domains": {
-      "main": [
-        [
-          {
-            "node": "crt.sh Query",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Pass Empty Host Summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Pass Empty Host Summary": {
-      "main": [
-        [
-          {
-            "node": "Log Run",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Build Manual Completion",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
     }
   },
   "settings": {
@@ -596,7 +551,7 @@
       "name": "monitoring"
     },
     {
-      "name": "ct-logs"
+      "name": "nvd"
     }
   ]
 }

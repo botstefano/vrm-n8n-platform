@@ -1,21 +1,12 @@
 {
-  "name": "WF-01 NVD CVE Monitoring",
+  "name": "WF-00 Global Error Handler",
   "nodes": [
     {
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "hours",
-              "hoursInterval": 6
-            }
-          ]
-        }
-      },
-      "id": "cron",
-      "name": "Cron 6h",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
+      "parameters": {},
+      "id": "err",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
       "position": [
         220,
         300
@@ -23,224 +14,47 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT GREATEST(COALESCE(MAX(last_run), now() - INTERVAL '1 day'), now() - INTERVAL '119 days') AS win_start,\n       now() AS win_end\nFROM monitoring_jobs WHERE job_type = 'nvd' AND vendor_id IS NULL;",
-        "options": {}
+        "jsCode": "const e = $input.first().json;\nconst wf = (e.workflow && e.workflow.name) || 'desconocido';\nconst ex = e.execution || {};\nconst msg = (ex.error && ex.error.message) || 'sin mensaje';\nconst node = ex.lastNodeExecuted || (ex.error && ex.error.node && ex.error.node.name) || 'n/a';\nreturn [{ json: {\n  workflow: wf,\n  workflow_id: e.workflow && e.workflow.id,\n  execution_id: ex.id,\n  execution_url: ex.url,\n  node,\n  message: String(msg).slice(0, 500)\n}}];"
       },
-      "id": "pg-window",
-      "name": "Get Window",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
+      "id": "build",
+      "name": "Build Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         460,
         300
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "postgresVrm",
-          "name": "Postgres VRM"
-        }
-      }
+      ]
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT vt.id, vt.vendor_id, vt.product_name, vt.cpe_match\nFROM vendor_technologies vt\nJOIN vendors v ON v.id = vt.vendor_id\nWHERE vt.is_active AND v.status IN ('approved','conditional','monitoring','incident', 'reevaluation');",
-        "options": {}
-      },
-      "id": "pg-tech",
-      "name": "Get Technologies",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        700,
-        300
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "postgresVrm",
-          "name": "Postgres VRM"
-        }
-      },
-      "alwaysOutputData": true
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "virtualMatchString",
-              "value": "={{ $json.cpe_match }}"
-            },
-            {
-              "name": "lastModStartDate",
-              "value": "={{ new Date($('Get Window').first().json.win_start).toISOString().replace('Z', '+00:00') }}"
-            },
-            {
-              "name": "lastModEndDate",
-              "value": "={{ new Date($('Get Window').first().json.win_end).toISOString().replace('Z', '+00:00') }}"
-            },
-            {
-              "name": "resultsPerPage",
-              "value": "2000"
-            }
-          ]
-        },
+        "method": "POST",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/alert-request",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'workflow_failed', severity: 'high', title: 'Falló el workflow ' + $json.workflow, description: $json.node + ': ' + $json.message + ' · ' + $json.execution_url, source: 'n8n', source_ref: $json.workflow + ':' + $json.node, fingerprint: 'wf_error:' + $json.workflow + ':' + $json.node }) }}",
         "options": {
-          "timeout": 30000,
-          "batching": {
-            "batch": {
-              "batchSize": 1,
-              "batchInterval": 6000
-            }
-          },
+          "timeout": 40000,
           "response": {
             "response": {
               "fullResponse": true,
               "neverError": true
             }
-          },
-          "pagination": {
-            "pagination": {
-              "paginationMode": "updateAParameterInEachRequest",
-              "parameters": {
-                "parameters": [
-                  {
-                    "type": "qs",
-                    "name": "startIndex",
-                    "value": "={{ $pageCount * 2000 }}"
-                  }
-                ]
-              },
-              "paginationCompleteWhen": "other",
-              "completeExpression": "={{ $response.statusCode !== 200 || ($response.body.startIndex + $response.body.resultsPerPage >= $response.body.totalResults) }}",
-              "limitPagesFetched": true,
-              "maxRequests": 50,
-              "requestInterval": 6000
-            }
           }
-        }
-      },
-      "id": "nvd",
-      "name": "NVD Query",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        940,
-        300
-      ],
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "httpHeaderNvd",
-          "name": "NVD API"
-        }
-      },
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 6000,
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "const MIN = Number($vars.NVD_MIN_CVSS || 7.0);\nconst win = $('Get Window').first().json;\nconst items = $input.all();\nconst seen = new Set();\nconst out = [];\nconst technologyStates = new Map();\nlet belowThreshold = 0;\n\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json;\n  const tech = $('Get Technologies').itemMatching(i).json;\n  const key = String(tech.id || (tech.vendor_id + '|' + tech.cpe_match));\n  const state = technologyStates.get(key) || {\n    tech,\n    totalResults: null,\n    lastEnd: 0,\n    failed: false\n  };\n  technologyStates.set(key, state);\n\n  if (!resp || resp.statusCode !== 200 || !resp.body || !Array.isArray(resp.body.vulnerabilities)) {\n    state.failed = true;\n    continue;\n  }\n\n  const body = resp.body;\n  state.totalResults = Number(body.totalResults ?? body.vulnerabilities.length);\n  state.lastEnd = Number(body.startIndex || 0) + Number(body.resultsPerPage ?? body.vulnerabilities.length);\n\n  for (const entry of body.vulnerabilities) {\n    const cve = entry.cve;\n    if (!cve || cve.vulnStatus === 'Rejected') continue;\n    const m = cve.metrics || {};\n    const metric = (m.cvssMetricV40 || m.cvssMetricV31 || m.cvssMetricV30 || m.cvssMetricV2 || [])[0];\n    const score = metric && metric.cvssData ? Number(metric.cvssData.baseScore) : null;\n    if (score === null || isNaN(score) || score < MIN) { belowThreshold++; continue; }\n    const findingKey = tech.vendor_id + '|' + cve.id;\n    if (seen.has(findingKey)) continue;\n    seen.add(findingKey);\n    const severity = score >= 9 ? 'critical' : score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low';\n    const desc = ((cve.descriptions || []).find(d => d.lang === 'en') || {}).value || 'Sin descripción';\n    out.push({ json: {\n      kind: 'finding', vendor_id: tech.vendor_id, source: 'nvd', source_ref: cve.id,\n      title: (cve.id + ' (CVSS ' + score + ') — ' + (tech.product_name || tech.cpe_match)).slice(0, 300),\n      description: desc.slice(0, 2000), severity,\n      evidence: { cve_id: cve.id, cvss: score, published: cve.published, last_modified: cve.lastModified,\n                  cpe_match: tech.cpe_match,\n                  references: (cve.references || []).slice(0, 5).map(r => r.url) }\n    }});\n  }\n}\n\nlet scanned = 0;\nlet failed = 0;\nfor (const state of technologyStates.values()) {\n  if (state.failed || state.totalResults === null || state.lastEnd < state.totalResults) failed++;\n  else scanned++;\n}\n\nconst findings = out.length;\nout.push({ json: { kind: 'summary', job_type: 'nvd', interval_min: 360,\n  status: failed > 0 ? 'partial' : 'ok',\n  last_run: failed > 0 ? win.win_start : win.win_end,\n  meta: { technologies: technologyStates.size, scanned, failed, findings, below_threshold: belowThreshold,\n          window: [win.win_start, win.win_end], page_size: 2000, max_pages_per_technology: 50 }\n} });\nreturn out;"
-      },
-      "id": "parse",
-      "name": "Parse CVEs",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1180,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "c1",
-              "leftValue": "={{ $json.kind }}",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              },
-              "rightValue": "finding"
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "if-finding",
-      "name": "IF Is Finding",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        1420,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "INSERT INTO vendor_findings\n  (vendor_id, source, source_ref, title, description, severity, status, evidence, detected_at, due_date)\nVALUES ($1::uuid, $2, $3, $4, $5, $6::finding_severity, 'open'::finding_status, $7::jsonb, now(),\n  now() + CASE $6::finding_severity\n    WHEN 'critical'::finding_severity THEN INTERVAL '7 days'\n    WHEN 'high'::finding_severity THEN INTERVAL '14 days'\n    WHEN 'medium'::finding_severity THEN INTERVAL '30 days'\n    ELSE INTERVAL '60 days' END)\nON CONFLICT (vendor_id, source, source_ref) DO UPDATE\nSET severity = EXCLUDED.severity,\n    title = EXCLUDED.title,\n    description = EXCLUDED.description,\n    evidence = EXCLUDED.evidence,\n    status = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN 'open'::finding_status ELSE vendor_findings.status END,\n    closed_at = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN NULL ELSE vendor_findings.closed_at END,\n    resolution = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN NULL ELSE vendor_findings.resolution END,\n    due_date = CASE\n      WHEN vendor_findings.status = 'closed' THEN EXCLUDED.due_date\n      ELSE COALESCE(LEAST(vendor_findings.due_date, EXCLUDED.due_date), vendor_findings.due_date, EXCLUDED.due_date)\n    END,\n    updated_at = now()\nWHERE vendor_findings.status = 'closed'\n   OR CASE EXCLUDED.severity\n        WHEN 'critical'::finding_severity THEN 5\n        WHEN 'high'::finding_severity THEN 4\n        WHEN 'medium'::finding_severity THEN 3\n        WHEN 'low'::finding_severity THEN 2\n        ELSE 1\n      END\n      > CASE vendor_findings.severity\n        WHEN 'critical'::finding_severity THEN 5\n        WHEN 'high'::finding_severity THEN 4\n        WHEN 'medium'::finding_severity THEN 3\n        WHEN 'low'::finding_severity THEN 2\n        ELSE 1\n      END\nRETURNING id, vendor_id, source, source_ref, title, description, severity;",
-        "options": {
-          "queryReplacement": "={{ [$json.vendor_id, $json.source, $json.source_ref, $json.title, $json.description, $json.severity, JSON.stringify($json.evidence || {})] }}"
-        }
-      },
-      "id": "pg-insert",
-      "name": "Insert Finding",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        1660,
-        100
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "postgresVrm",
-          "name": "Postgres VRM"
-        }
-      },
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/findings-created",
-        "sendBody": true,
-        "contentType": "json",
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ finding_id: $json.id, vendor_id: $json.vendor_id, severity: $json.severity, source: $json.source, source_ref: $json.source_ref, title: $json.title, description: $json.description }) }}",
-        "options": {
-          "timeout": 40000
         },
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
-      "id": "notify",
-      "name": "Notify Backend",
+      "id": "alert",
+      "name": "Send Alert",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1900,
-        100
+        700,
+        300
       ],
       "retryOnFail": true,
-      "maxTries": 3,
+      "maxTries": 2,
       "waitBetweenTries": 2000,
       "onError": "continueRegularOutput",
       "credentials": {
@@ -252,87 +66,29 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "INSERT INTO monitoring_jobs (vendor_id, job_type, last_run, next_run, status, result_meta)\nVALUES (NULL, $1, $5::timestamptz, now() + make_interval(mins => $2::int), $3, $4::jsonb)\nON CONFLICT (job_type) WHERE vendor_id IS NULL\nDO UPDATE SET last_run = EXCLUDED.last_run, next_run = EXCLUDED.next_run,\n              status = EXCLUDED.status, result_meta = EXCLUDED.result_meta;",
-        "options": {
-          "queryReplacement": "={{ [$json.job_type, $json.interval_min, $json.status, JSON.stringify($json.meta || {}), $json.last_run || new Date().toISOString()] }}"
-        }
-      },
-      "id": "pg-log",
-      "name": "Log Run",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        1660,
-        500
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "postgresVrm",
-          "name": "Postgres VRM"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "vrm-manual/wf-01",
-        "authentication": "headerAuth",
-        "responseMode": "onReceived",
-        "options": {}
-      },
-      "id": "manual-webhook",
-      "name": "Manual Trigger",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
-      "position": [
-        220,
-        520
-      ],
-      "webhookId": "vrm-manual-wf-01",
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "httpHeaderAlerts",
-          "name": "VRM Alerts Webhook Auth"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst summary = $('Parse CVEs').isExecuted\n  ? ($('Parse CVEs').all().map(item => item.json).find(item => item.kind === 'summary') || {})\n  : $('Build Empty Summary').first().json;\nconst meta = summary.meta || {};\nconst resultStatus = summary.status === 'error' ? 'failed' : summary.status === 'partial' ? 'partial' : 'success';\nconst findings = Number(meta.findings || 0);\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-01',\n  status: resultStatus,\n  summary: 'Escaneo NVD completado: ' + findings + ' hallazgo(s) procesado(s).',\n  details: meta\n} }];"
-      },
-      "id": "manual-completion-code-wf-01",
-      "name": "Build Manual Completion",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1900,
-        520
-      ]
-    },
-    {
-      "parameters": {
         "method": "POST",
-        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-failed",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json) }}",
+        "jsonBody": "={{ JSON.stringify({ workflow: $('Build Payload').first().json.workflow, workflow_id: $('Build Payload').first().json.workflow_id, execution_id: $('Build Payload').first().json.execution_id, execution_url: $('Build Payload').first().json.execution_url, node: $('Build Payload').first().json.node, message: $('Build Payload').first().json.message }) }}",
         "options": {
           "timeout": 10000
         },
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
-      "id": "manual-completion-http-wf-01",
-      "name": "Report Manual Completion",
+      "id": "report",
+      "name": "Report Backend",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2140,
-        520
+        940,
+        300
       ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
       "onError": "continueRegularOutput",
       "credentials": {
         "httpHeaderAuth": {
@@ -340,199 +96,30 @@
           "name": "VRM Backend Callback Auth"
         }
       }
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "has-target",
-              "leftValue": "={{ Boolean($json.cpe_match) }}",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "if-has-target-wf-01-nvd-cve.json",
-      "name": "IF Has Scan Targets",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        680,
-        120
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "return [{ json: {\n  kind: 'summary', job_type: 'nvd', interval_min: 360, status: 'ok',\n  last_run: $('Get Window').first().json.win_start,\n  meta: { technologies: 0, scanned: 0, failed: 0, findings: 0, below_threshold: 0 }\n} }];"
-      },
-      "id": "build-empty-summary-wf-01-nvd-cve.json",
-      "name": "Build Empty Summary",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        920,
-        520
-      ]
     }
   ],
   "connections": {
-    "Cron 6h": {
+    "Error Trigger": {
       "main": [
         [
           {
-            "node": "Get Window",
+            "node": "Build Payload",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Get Window": {
+    "Build Payload": {
       "main": [
         [
           {
-            "node": "Get Technologies",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Get Technologies": {
-      "main": [
-        [
-          {
-            "node": "IF Has Scan Targets",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "NVD Query": {
-      "main": [
-        [
-          {
-            "node": "Parse CVEs",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse CVEs": {
-      "main": [
-        [
-          {
-            "node": "IF Is Finding",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF Is Finding": {
-      "main": [
-        [
-          {
-            "node": "Insert Finding",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Log Run",
+            "node": "Send Alert",
             "type": "main",
             "index": 0
           },
           {
-            "node": "Build Manual Completion",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Insert Finding": {
-      "main": [
-        [
-          {
-            "node": "Notify Backend",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Notify Backend": {
-      "main": [
-        []
-      ]
-    },
-    "Manual Trigger": {
-      "main": [
-        [
-          {
-            "node": "Get Window",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Manual Completion": {
-      "main": [
-        [
-          {
-            "node": "Report Manual Completion",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF Has Scan Targets": {
-      "main": [
-        [
-          {
-            "node": "NVD Query",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Build Empty Summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Empty Summary": {
-      "main": [
-        [
-          {
-            "node": "Log Run",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Build Manual Completion",
+            "node": "Report Backend",
             "type": "main",
             "index": 0
           }
@@ -548,10 +135,10 @@
   "pinData": {},
   "tags": [
     {
-      "name": "monitoring"
+      "name": "core"
     },
     {
-      "name": "nvd"
+      "name": "errors"
     }
   ]
 }

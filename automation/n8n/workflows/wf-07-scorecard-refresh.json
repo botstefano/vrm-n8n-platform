@@ -1,19 +1,19 @@
 {
-  "name": "WF-08 Health Check",
+  "name": "WF-07 Scorecard Refresh",
   "nodes": [
     {
       "parameters": {
         "rule": {
           "interval": [
             {
-              "field": "minutes",
-              "minutesInterval": 30
+              "field": "hours",
+              "hoursInterval": 1
             }
           ]
         }
       },
       "id": "cron",
-      "name": "Cron 30m",
+      "name": "Cron 1h",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -23,51 +23,16 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{ $vars.VRM_BACKEND_URL }}/health",
-        "options": {
-          "timeout": 10000,
-          "response": {
-            "response": {
-              "fullResponse": true,
-              "neverError": true
-            }
-          }
-        },
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth"
-      },
-      "id": "health",
-      "name": "Backend Health",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        460,
-        300
-      ],
-      "onError": "continueRegularOutput",
-      "alwaysOutputData": true,
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "vrmBackendCallbackAuth",
-          "name": "VRM Backend Callback Auth"
-        }
-      }
-    },
-    {
-      "parameters": {
         "operation": "executeQuery",
-        "query": "WITH stale_executions AS (\n  UPDATE workflow_execution_logs\n     SET status = 'failed',\n         completed_at = now(),\n         summary = CASE\n           WHEN COALESCE(summary, '') = '' THEN 'Marcada como fallida: no se recibió callback dentro del plazo.'\n           ELSE summary || ' · Marcada como fallida: no se recibió callback dentro del plazo.'\n         END,\n         details = COALESCE(details, '{}'::jsonb) ||\n           jsonb_build_object('stale_marked_at', now(), 'stale_reason', 'callback_timeout')\n   WHERE status = 'running'\n     AND started_at < now() - make_interval(hours => $1::int)\n  RETURNING id\n), stale_count AS (\n  SELECT COUNT(*)::int AS count FROM stale_executions\n), expected(job_type) AS (\n  VALUES ('nvd'), ('ct_log'), ('tls_expiry'), ('shodan'), ('scorecard_refresh_all'), ('cleanup_archive')\n), latest AS (\n  SELECT DISTINCT ON (job_type) job_type, last_run, status\n  FROM monitoring_jobs\n  ORDER BY job_type, last_run DESC NULLS LAST, id DESC\n)\nSELECT e.job_type, latest.last_run, latest.status, stale_count.count AS stale_executions\nFROM expected e\nCROSS JOIN stale_count\nLEFT JOIN latest USING (job_type)\nORDER BY e.job_type;",
-        "options": {
-          "queryReplacement": "={{ [Number($vars.WORKFLOW_STALE_HOURS || 12)] }}"
-        }
+        "query": "SELECT id FROM vendors WHERE status IN ('approved','conditional','monitoring','incident','reevaluation');",
+        "options": {}
       },
-      "id": "pg-jobs",
-      "name": "Get Job Status",
+      "id": "pg-vendors",
+      "name": "Get Active Vendors",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        700,
+        460,
         300
       ],
       "credentials": {
@@ -80,16 +45,81 @@
     },
     {
       "parameters": {
-        "jsCode": "// Intervalo esperado (min). Un job se considera atrasado si supera 2x ese intervalo.\nconst EXPECTED = { nvd: 360, ct_log: 1440, tls_expiry: 1440, shodan: 1440,\n                   scorecard_refresh_all: 60, cleanup_archive: 1440 };\nconst jobs = $input.all().map(i => i.json).filter(j => j.job_type);\nconst byType = Object.fromEntries(jobs.map(j => [j.job_type, j]));\nconst now = Date.now();\nconst problems = [];\nconst staleExecutions = Number(jobs[0]?.stale_executions || 0);\nif (staleExecutions > 0) {\n  problems.push({ name: 'workflow_executions', issue: staleExecutions + ' ejecución(es) manual(es) marcada(s) como fallida(s) por ausencia de callback durante ' + Number($vars.WORKFLOW_STALE_HOURS || 12) + ' horas' });\n}\nfor (const [type, exp] of Object.entries(EXPECTED)) {\n  const j = byType[type];\n  if (!j || !j.last_run) { problems.push({ name: type, issue: 'nunca se ha ejecutado' }); continue; }\n  const age = Math.round((now - new Date(j.last_run).getTime()) / 60000);\n  if (age > exp * 2) problems.push({ name: type, issue: 'atrasado ' + age + ' min (esperado cada ' + exp + ')' });\n  else if (j.status === 'error' || j.status === 'partial') problems.push({ name: type, issue: 'última ejecución incompleta o con errores' });\n}\nconst h = $('Backend Health').first().json || {};\nconst backendOk = h.statusCode >= 200 && h.statusCode < 300;\nif (!backendOk) problems.unshift({ name: 'backend', issue: 'health check falló (' + (h.statusCode || h.error || 'sin respuesta') + ')' });\nreturn [{ json: {\n  healthy: problems.length === 0,\n  backend_down: !backendOk,\n  problems,\n  fingerprint: 'n8n_health:' + problems.map(p => p.name).sort().join(',')\n}}];"
+        "method": "POST",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/scorecard/recalc/{{ $json.id }}",
+        "options": {
+          "timeout": 30000,
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 250
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
-      "id": "detect",
-      "name": "Detect Problems",
+      "id": "recalc",
+      "name": "Recalc Scorecard",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst ok = items.filter(i => i.json.statusCode >= 200 && i.json.statusCode < 300).length;\nconst fail = items.length - ok;\nreturn [{ json: { job_type: 'scorecard_refresh_all', interval_min: 60,\n  status: fail === 0 ? 'ok' : (ok === 0 ? 'error' : 'partial'),\n  total: items.length, ok, fail, meta: { total: items.length, ok, fail } } }];"
+      },
+      "id": "aggregate",
+      "name": "Aggregate",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         940,
         300
       ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO monitoring_jobs (vendor_id, job_type, last_run, next_run, status, result_meta)\nVALUES (NULL, $1, $5::timestamptz, now() + make_interval(mins => $2::int), $3, $4::jsonb)\nON CONFLICT (job_type) WHERE vendor_id IS NULL\nDO UPDATE SET last_run = EXCLUDED.last_run, next_run = EXCLUDED.next_run,\n              status = EXCLUDED.status, result_meta = EXCLUDED.result_meta;",
+        "options": {
+          "queryReplacement": "={{ [$json.job_type, $json.interval_min, $json.status, JSON.stringify($json.meta || {}), $json.last_run || new Date().toISOString()] }}"
+        }
+      },
+      "id": "pg-log",
+      "name": "Log Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1180,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -103,24 +133,24 @@
           "conditions": [
             {
               "id": "c1",
-              "leftValue": "={{ $json.healthy }}",
+              "leftValue": "={{ $('Aggregate').first().json.fail }}",
               "operator": {
-                "type": "boolean",
-                "operation": "false",
-                "singleValue": true
-              }
+                "type": "number",
+                "operation": "gt"
+              },
+              "rightValue": 0
             }
           ],
           "combinator": "and"
         },
         "options": {}
       },
-      "id": "if-bad",
-      "name": "IF Unhealthy",
+      "id": "if-fail",
+      "name": "IF Failures",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1180,
+        1420,
         300
       ]
     },
@@ -131,7 +161,7 @@
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ type: 'n8n_health', severity: $json.backend_down ? 'critical' : 'high', title: 'VRM: ' + $json.problems.length + ' problema(s) de salud detectados', description: $json.problems.map(p => p.name + ': ' + p.issue).join(' | '), source: 'n8n', source_ref: 'health', fingerprint: $json.fingerprint }) }}",
+        "jsonBody": "={{ JSON.stringify({ type: 'scorecard_refresh', severity: 'medium', title: 'Scorecard: ' + $('Aggregate').first().json.fail + ' proveedores fallaron al recalcular', source: 'n8n', source_ref: 'scorecard_refresh', fingerprint: 'scorecard:partial' }) }}",
         "options": {
           "timeout": 40000
         },
@@ -139,11 +169,11 @@
         "genericAuthType": "httpHeaderAuth"
       },
       "id": "alert",
-      "name": "Alert Unhealthy",
+      "name": "Send Alert",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1420,
+        1660,
         300
       ],
       "retryOnFail": true,
@@ -158,20 +188,9 @@
       }
     },
     {
-      "parameters": {},
-      "id": "ok",
-      "name": "Healthy",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [
-        1420,
-        500
-      ]
-    },
-    {
       "parameters": {
         "httpMethod": "POST",
-        "path": "vrm-manual/wf-08",
+        "path": "vrm-manual/wf-07",
         "authentication": "headerAuth",
         "responseMode": "onReceived",
         "options": {}
@@ -184,7 +203,7 @@
         220,
         520
       ],
-      "webhookId": "vrm-manual-wf-08",
+      "webhookId": "vrm-manual-wf-07",
       "credentials": {
         "httpHeaderAuth": {
           "id": "httpHeaderAlerts",
@@ -194,9 +213,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst result = $('Detect Problems').first().json || {};\nconst problems = Array.isArray(result.problems) ? result.problems : [];\nconst status = result.backend_down ? 'failed' : problems.length ? 'partial' : 'success';\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-08',\n  status,\n  summary: problems.length ? 'Health check detectó ' + problems.length + ' problema(s).' : 'Health check sin incidencias.',\n  details: { healthy: Boolean(result.healthy), backend_down: Boolean(result.backend_down), problems }\n} }];"
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst aggregate = $('Aggregate').isExecuted ? ($('Aggregate').first().json || {}) : ($('Build Empty Summary').first().json || {});\nconst total = Number(aggregate.total || 0);\nconst ok = Number(aggregate.ok || 0);\nconst fail = Number(aggregate.fail || 0);\nconst status = fail === 0 ? 'success' : ok === 0 ? 'failed' : 'partial';\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-07',\n  status,\n  summary: 'Scorecards: ' + ok + '/' + total + ' recalculados; ' + fail + ' error(es).',\n  details: { total, ok, fail }\n} }];"
       },
-      "id": "manual-completion-code-wf-08",
+      "id": "manual-completion-code-wf-07",
       "name": "Build Manual Completion",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -219,7 +238,7 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
-      "id": "manual-completion-http-wf-08",
+      "id": "manual-completion-http-wf-07",
       "name": "Report Manual Completion",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -234,65 +253,116 @@
           "name": "VRM Backend Callback Auth"
         }
       }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-active-vendors",
+              "leftValue": "={{ Boolean($json.id) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-active-vendors",
+      "name": "IF Has Active Vendors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        620,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  job_type: 'scorecard_refresh_all',\n  interval_min: 60,\n  status: 'ok',\n  last_run: new Date().toISOString(),\n  total: 0,\n  ok: 0,\n  fail: 0,\n  meta: { total: 0, ok: 0, fail: 0 }\n} }];"
+      },
+      "id": "build-empty-summary-wf-07",
+      "name": "Build Empty Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        560
+      ]
     }
   ],
   "connections": {
-    "Cron 30m": {
+    "Cron 1h": {
       "main": [
         [
           {
-            "node": "Backend Health",
+            "node": "Get Active Vendors",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Backend Health": {
+    "Get Active Vendors": {
       "main": [
         [
           {
-            "node": "Get Job Status",
+            "node": "IF Has Active Vendors",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Get Job Status": {
+    "Recalc Scorecard": {
       "main": [
         [
           {
-            "node": "Detect Problems",
+            "node": "Aggregate",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Detect Problems": {
+    "Aggregate": {
       "main": [
         [
           {
-            "node": "IF Unhealthy",
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF Failures",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "IF Unhealthy": {
+    "IF Failures": {
       "main": [
         [
           {
-            "node": "Alert Unhealthy",
+            "node": "Send Alert",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Healthy",
+            "node": "Build Manual Completion",
             "type": "main",
             "index": 0
           }
@@ -303,25 +373,14 @@
       "main": [
         [
           {
-            "node": "Backend Health",
+            "node": "Get Active Vendors",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Alert Unhealthy": {
-      "main": [
-        [
-          {
-            "node": "Build Manual Completion",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Healthy": {
+    "Send Alert": {
       "main": [
         [
           {
@@ -342,6 +401,40 @@
           }
         ]
       ]
+    },
+    "IF Has Active Vendors": {
+      "main": [
+        [
+          {
+            "node": "Recalc Scorecard",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Empty Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Empty Summary": {
+      "main": [
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -352,10 +445,7 @@
   "pinData": {},
   "tags": [
     {
-      "name": "monitoring"
-    },
-    {
-      "name": "health"
+      "name": "scorecard"
     }
   ]
 }

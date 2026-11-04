@@ -1,5 +1,5 @@
 {
-  "name": "WF-05 Re-evaluation Scheduler",
+  "name": "WF-04 Attack Surface (Shodan)",
   "nodes": [
     {
       "parameters": {
@@ -7,13 +7,13 @@
           "interval": [
             {
               "field": "hours",
-              "hoursInterval": 6
+              "hoursInterval": 24
             }
           ]
         }
       },
       "id": "cron",
-      "name": "Cron 6h",
+      "name": "Cron 24h",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
@@ -24,11 +24,11 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT v.id, v.legal_name, v.criticality, v.current_risk,\n       v.primary_contact->>'email' AS email,\n       CASE WHEN v.criticality >= 4 THEN 90 WHEN v.criticality = 3 THEN 180 ELSE 365 END AS interval_days\nFROM vendors v\nWHERE (\n    (v.status IN ('approved','conditional','monitoring') AND (v.next_evaluation IS NULL OR v.next_evaluation <= now()))\n    OR (v.status = 'reevaluation' AND EXISTS (\n      SELECT 1 FROM assessments expired\n      WHERE expired.vendor_id = v.id AND expired.status = 'expired'\n    ))\n  )\n  AND NOT EXISTS (SELECT 1 FROM assessments a\n                  WHERE a.vendor_id = v.id AND a.status IN ('pending','in_progress'))\nORDER BY v.criticality DESC, v.next_evaluation NULLS FIRST\nLIMIT 50;",
+        "query": "SELECT id, legal_name, website FROM vendors WHERE status IN ('approved','conditional','monitoring','incident','reevaluation') AND website IS NOT NULL ORDER BY criticality DESC LIMIT 200;",
         "options": {}
       },
-      "id": "pg-due",
-      "name": "Find Due Vendors",
+      "id": "pg-vendors",
+      "name": "Get Vendors",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
@@ -45,39 +45,27 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "WITH a AS (\n  INSERT INTO assessments (vendor_id, questionnaire_id, status, started_at)\n  SELECT $1::uuid, q.id, 'pending', now()\n  FROM questionnaires q WHERE q.is_active = true\n  ORDER BY q.version DESC LIMIT 1\n  RETURNING id, vendor_id\n), v AS (\n  UPDATE vendors\n     SET status = 'reevaluation'::vendor_status,\n         next_evaluation = now() + make_interval(days => $2::int),\n         updated_at = now()\n   WHERE id = $1::uuid AND EXISTS (SELECT 1 FROM a)\n  RETURNING id\n)\nSELECT a.id AS assessment_id, a.vendor_id FROM a JOIN v ON v.id = a.vendor_id;",
-        "options": {
-          "queryReplacement": "={{ [$json.id, $json.interval_days] }}"
-        }
+        "jsCode": "const items = $input.all().filter(it => it.json && it.json.id && it.json.website);\nconst out = [];\nfor (const it of items) {\n  try {\n    const u = new URL(/^https?:\\/\\//i.test(it.json.website) ? it.json.website : 'https://' + it.json.website);\n    out.push({ json: { vendor_id: it.json.id, host: u.hostname.toLowerCase() } });\n  } catch (e) { /* ignorar URL inválida */ }\n}\nif (!out.length) {\n  return [{ json: {\n    kind: 'summary',\n    job_type: 'shodan',\n    interval_min: 1440,\n    status: 'ok',\n    last_run: new Date().toISOString(),\n    meta: { scanned: 0, failed: 0, no_data: 0, blocked: 0, findings: 0, invalid_websites: items.length }\n  } }];\n}\nreturn out;"
       },
-      "id": "pg-reeval",
-      "name": "Create Assessment",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
+      "id": "extract",
+      "name": "Extract Host",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         700,
         300
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "postgresVrm",
-          "name": "Postgres VRM"
-        }
-      },
-      "retryOnFail": true,
-      "maxTries": 2
+      ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/assessment-link",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/resolve-host",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ assessment_id: $json.assessment_id, vendor_id: $json.vendor_id }) }}",
+        "jsonBody": "={{ JSON.stringify({ vendor_id: $json.vendor_id, host: $json.host }) }}",
         "options": {
-          "timeout": 15000,
+          "timeout": 20000,
           "response": {
             "response": {
               "fullResponse": true,
@@ -88,14 +76,234 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
-      "id": "link",
-      "name": "Sign Portal Link",
+      "id": "resolve",
+      "name": "Resolve IP",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
         940,
         300
       ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "httpQueryShodan",
+          "name": "Shodan API"
+        },
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nreturn items.map((item, index) => {\n  const response = item.json.body || item.json || {};\n  const original = $('Extract Host').itemMatching(index).json;\n  const target = { ...original, ...(response.vendor_id ? { vendor_id: response.vendor_id } : {}), host: response.host || original.host };\n  if (!response.ip) {\n    return { json: {\n      ...target,\n      skip: true,\n      skip_reason: response.skip_reason || 'resolver_error',\n      resolver_status: item.json.statusCode || null\n    }};\n  }\n  return { json: { ...target, skip: false, ip: String(response.ip) }};\n});"
+      },
+      "id": "extract-ip",
+      "name": "Extract IP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.skip === true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-ip",
+      "name": "IF Has IP",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1420,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "skip",
+      "name": "Skip",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1660,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.shodan.io/shodan/host/{{ $json.ip }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "minify",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "shodan",
+      "name": "Shodan Host",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1660,
+        300
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "httpQueryShodan",
+          "name": "Shodan API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const PORTS = {\n  21: ['FTP', 'medium'], 23: ['Telnet', 'high'], 135: ['MS-RPC', 'high'], 139: ['NetBIOS', 'high'],\n  445: ['SMB', 'critical'], 1433: ['MS SQL', 'high'], 1521: ['Oracle DB', 'high'], 3306: ['MySQL', 'high'],\n  3389: ['RDP', 'critical'], 5432: ['PostgreSQL', 'high'], 5900: ['VNC', 'high'], 6379: ['Redis', 'critical'],\n  9200: ['Elasticsearch', 'high'], 11211: ['Memcached', 'high'], 27017: ['MongoDB', 'critical']\n};\nconst targets = $('Extract IP').all().map(i => i.json).filter(t => t.ip);\nconst out = [];\nlet failed = 0, scanned = 0, noData = 0;\nconst skippedTargets = $('Extract IP').all().map(item => item.json).filter(item => item.skip === true);\nconst blocked = skippedTargets.filter(item => item.skip_reason === 'private_or_reserved' || item.skip_reason === 'no_public_ip').length;\nconst resolveFailed = skippedTargets.filter(item => item.skip_reason === 'resolver_error').length;\nfor (const it of $input.all()) {\n  const r = it.json;\n  if (r.statusCode === 404) { noData++; continue; }          // Shodan sin datos para esa IP\n  if (r.statusCode !== 200 || !r.body) { failed++; continue; }\n  scanned++;\n  const h = r.body;\n  const matchingTargets = targets.filter(x => x.ip === h.ip_str);\n  if (!matchingTargets.length) continue;\n  const vulns = Array.isArray(h.vulns) ? h.vulns : Object.keys(h.vulns || {});\n  for (const t of matchingTargets) {\n    for (const p of (h.ports || [])) {\n      const d = PORTS[p];\n      if (!d) continue;\n      out.push({ json: { kind: 'finding', vendor_id: t.vendor_id, source: 'shodan',\n        source_ref: 'port:' + h.ip_str + ':' + p,\n        title: 'Puerto ' + p + ' (' + d[0] + ') expuesto en ' + t.host,\n        description: 'Shodan detecta ' + d[0] + ' accesible desde Internet en ' + h.ip_str + ':' + p + '.',\n        severity: d[1],\n        evidence: { host: t.host, ip: h.ip_str, port: p, service: d[0], org: h.org, last_update: h.last_update } } });\n    }\n    if (vulns.length) {\n      out.push({ json: { kind: 'finding', vendor_id: t.vendor_id, source: 'shodan', source_ref: 'cves:' + h.ip_str,\n        title: vulns.length + ' CVE(s) potenciales en ' + t.host + ' (' + h.ip_str + ')',\n        description: 'Shodan asocia estas CVEs a los banners: ' + vulns.slice(0, 20).join(', '),\n        severity: 'high',\n        evidence: { host: t.host, ip: h.ip_str, cves: vulns.slice(0, 20), total: vulns.length } } });\n    }\n  }\n}\nconst findings = out.length;\nout.push({ json: { kind: 'summary', job_type: 'shodan', interval_min: 1440,\n  status: failed + resolveFailed === 0 ? 'ok' : (scanned === 0 ? 'error' : 'partial'),\n  meta: { scanned, failed: failed + resolveFailed, shodan_failed: failed, resolver_failed: resolveFailed, no_data: noData, blocked, findings } } });\nreturn out;"
+      },
+      "id": "analyze",
+      "name": "Analyze Surface",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.kind }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "finding"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-finding",
+      "name": "IF Is Finding",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2140,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO vendor_findings\n  (vendor_id, source, source_ref, title, description, severity, status, evidence, detected_at, due_date)\nVALUES ($1::uuid, $2, $3, $4, $5, $6::finding_severity, 'open'::finding_status, $7::jsonb, now(),\n  now() + CASE $6::finding_severity\n    WHEN 'critical'::finding_severity THEN INTERVAL '7 days'\n    WHEN 'high'::finding_severity THEN INTERVAL '14 days'\n    WHEN 'medium'::finding_severity THEN INTERVAL '30 days'\n    ELSE INTERVAL '60 days' END)\nON CONFLICT (vendor_id, source, source_ref) DO UPDATE\nSET severity = EXCLUDED.severity,\n    title = EXCLUDED.title,\n    description = EXCLUDED.description,\n    evidence = EXCLUDED.evidence,\n    status = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN 'open'::finding_status ELSE vendor_findings.status END,\n    closed_at = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN NULL ELSE vendor_findings.closed_at END,\n    resolution = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN NULL ELSE vendor_findings.resolution END,\n    due_date = CASE\n      WHEN vendor_findings.status = 'closed' THEN EXCLUDED.due_date\n      ELSE COALESCE(LEAST(vendor_findings.due_date, EXCLUDED.due_date), vendor_findings.due_date, EXCLUDED.due_date)\n    END,\n    updated_at = now()\nWHERE vendor_findings.status = 'closed'\n   OR CASE EXCLUDED.severity\n        WHEN 'critical'::finding_severity THEN 5\n        WHEN 'high'::finding_severity THEN 4\n        WHEN 'medium'::finding_severity THEN 3\n        WHEN 'low'::finding_severity THEN 2\n        ELSE 1\n      END\n      > CASE vendor_findings.severity\n        WHEN 'critical'::finding_severity THEN 5\n        WHEN 'high'::finding_severity THEN 4\n        WHEN 'medium'::finding_severity THEN 3\n        WHEN 'low'::finding_severity THEN 2\n        ELSE 1\n      END\nRETURNING id, vendor_id, source, source_ref, title, description, severity;",
+        "options": {
+          "queryReplacement": "={{ [$json.vendor_id, $json.source, $json.source_ref, $json.title, $json.description, $json.severity, JSON.stringify($json.evidence || {})] }}"
+        }
+      },
+      "id": "pg-insert",
+      "name": "Insert Finding",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2380,
+        100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/findings-created",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ finding_id: $json.id, vendor_id: $json.vendor_id, severity: $json.severity, source: $json.source, source_ref: $json.source_ref, title: $json.title, description: $json.description }) }}",
+        "options": {
+          "timeout": 40000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "notify",
+      "name": "Notify Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2620,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
       "credentials": {
         "httpHeaderAuth": {
           "id": "vrmBackendCallbackAuth",
@@ -105,8 +313,32 @@
     },
     {
       "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO monitoring_jobs (vendor_id, job_type, last_run, next_run, status, result_meta)\nVALUES (NULL, $1, $5::timestamptz, now() + make_interval(mins => $2::int), $3, $4::jsonb)\nON CONFLICT (job_type) WHERE vendor_id IS NULL\nDO UPDATE SET last_run = EXCLUDED.last_run, next_run = EXCLUDED.next_run,\n              status = EXCLUDED.status, result_meta = EXCLUDED.result_meta;",
+        "options": {
+          "queryReplacement": "={{ [$json.job_type, $json.interval_min, $json.status, JSON.stringify($json.meta || {}), $json.last_run || new Date().toISOString()] }}"
+        }
+      },
+      "id": "pg-log",
+      "name": "Log Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2380,
+        500
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
         "httpMethod": "POST",
-        "path": "vrm-manual/wf-05",
+        "path": "vrm-manual/wf-04",
         "authentication": "headerAuth",
         "responseMode": "onReceived",
         "options": {}
@@ -119,7 +351,7 @@
         220,
         520
       ],
-      "webhookId": "vrm-manual-wf-05",
+      "webhookId": "vrm-manual-wf-04",
       "credentials": {
         "httpHeaderAuth": {
           "id": "httpHeaderAlerts",
@@ -129,142 +361,14 @@
     },
     {
       "parameters": {
-        "jsCode": "const escapeHtml = (value) => String(value || '').replace(/[&<>\"']/g, (c) => ({\n  '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'\n}[c]));\nreturn $('Sign Portal Link').all()\n  .map(entry => entry.json.body || entry.json)\n  .map(item => ({\n    json: {\n      email_present: Boolean(item.email && item.link),\n      to: item.email || '',\n      subject: 'Evaluación de seguridad de proveedores - VRM',\n      html: '<div style=\"font-family:Arial,sans-serif;max-width:640px;margin:auto;padding:24px;color:#0f172a\">' +\n        '<h2>Evaluación de seguridad de proveedores</h2>' +\n        '<p>Hola,</p>' +\n        '<p>Se solicita completar la evaluación de seguridad de <strong>' + escapeHtml(item.legal_name) + '</strong>.</p>' +\n        '<p>Utiliza el siguiente enlace seguro, válido durante 30 días y de un solo uso:</p>' +\n        '<p><a href=\"' + escapeHtml(item.link) + '\" style=\"display:inline-block;padding:12px 18px;background:#0891b2;color:#fff;text-decoration:none;border-radius:6px\">Completar evaluación</a></p>' +\n        '<p style=\"font-size:12px;color:#64748b\">Si no esperabas esta solicitud, contacta al equipo responsable de gestión de proveedores.</p>' +\n        '</div>'\n    }\n  }));"
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst summary = $('Analyze Surface').isExecuted\n  ? ($('Analyze Surface').all().map(item => item.json).find(item => item.kind === 'summary') || {})\n  : $('Build Skip Summary').isExecuted\n    ? $('Build Skip Summary').first().json\n    : $('Pass Empty Host Summary').isExecuted\n      ? $('Pass Empty Host Summary').first().json\n      : $('Build Empty Summary').first().json;\nconst meta = summary.meta || {};\nconst resultStatus = summary.status === 'error' ? 'failed' : summary.status === 'partial' ? 'partial' : 'success';\nconst findings = Number(meta.findings || 0);\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-04',\n  status: resultStatus,\n  summary: 'Escaneo de superficie completado: ' + findings + ' hallazgo(s) procesado(s).',\n  details: meta\n} }];"
       },
-      "id": "prepare-invitation",
-      "name": "Prepare Invitation Email",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1420,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "fromEmail": "={{ $vars.SMTP_FROM }}",
-        "toEmail": "={{ $json.to }}",
-        "subject": "={{ $json.subject }}",
-        "emailFormat": "html",
-        "html": "={{ $json.html }}",
-        "options": {}
-      },
-      "id": "send-invitation-email",
-      "name": "Send Invitation Email",
-      "type": "n8n-nodes-base.emailSend",
-      "typeVersion": 2.1,
-      "position": [
-        1660,
-        300
-      ],
-      "credentials": {
-        "smtp": {
-          "id": "smtpVrm",
-          "name": "SMTP VRM"
-        }
-      },
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 5000,
-      "onError": "continueErrorOutput"
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "WITH expired AS (\n  UPDATE assessments\n     SET status = 'expired', portal_token_hash = NULL, token_expires_at = NULL\n   WHERE status IN ('pending','in_progress')\n     AND token_expires_at IS NOT NULL\n     AND token_expires_at <= now()\n  RETURNING id\n)\nSELECT COUNT(*)::int AS expired_assessments FROM expired;",
-        "options": {}
-      },
-      "id": "expire-assessments",
-      "name": "Expire Old Assessments",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        460,
-        120
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "postgresVrm",
-          "name": "Postgres VRM"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "has-vendor",
-              "leftValue": "={{ Boolean($json.id) }}",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "if-has-due-vendors",
-      "name": "IF Has Due Vendors",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        700,
-        120
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "has-email",
-              "leftValue": "={{ $json.email_present === true }}",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "if-has-contact-email",
-      "name": "IF Has Contact Email",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        1900,
-        120
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst due = $('Find Due Vendors').all().map(item => item.json).filter(item => item.id);\nconst signed = $('Sign Portal Link').isExecuted ? $('Sign Portal Link').all().map(item => item.json.body || item.json) : [];\nconst expectedEmails = signed.filter(item => item.email && item.link).length;\nconst missingEmails = Math.max(0, signed.length - expectedEmails);\nconst inputErrors = $input.all().some(item => Boolean(item.json?.error || item.json?.errorMessage));\nconst emailNode = $('Send Invitation Email');\nconst emailResults = emailNode.isExecuted ? emailNode.all() : [];\nconst sentEmails = inputErrors ? 0 : emailResults.length;\nconst status = inputErrors ? 'failed' : missingEmails > 0 ? 'partial' : 'success';\nlet summary;\nif (due.length === 0) summary = 'No había proveedores con reevaluación vencida.';\nelse if (inputErrors) summary = 'Se crearon ' + signed.length + ' evaluación(es), pero falló la entrega de correo.';\nelse summary = 'Evaluaciones creadas: ' + signed.length + '; correos enviados: ' + sentEmails + '; contactos sin email: ' + missingEmails + '.';\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-05',\n  status,\n  summary,\n  details: { due_vendors: due.length, invitations_created: signed.length, emails_expected: expectedEmails, emails_sent: sentEmails, missing_contact_emails: missingEmails, email_error: inputErrors }\n} }];"
-      },
-      "id": "manual-completion-code-wf-05",
+      "id": "manual-completion-code-wf-04",
       "name": "Build Manual Completion",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2380,
+        1900,
         520
       ]
     },
@@ -282,12 +386,12 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
-      "id": "manual-completion-http-wf-05",
+      "id": "manual-completion-http-wf-04",
       "name": "Report Manual Completion",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2620,
+        2140,
         520
       ],
       "onError": "continueRegularOutput",
@@ -297,134 +401,253 @@
           "name": "VRM Backend Callback Auth"
         }
       }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-target",
+              "leftValue": "={{ Boolean($json.id) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-target-wf-04-attack-surface.json",
+      "name": "IF Has Scan Targets",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  kind: 'summary', job_type: 'shodan', interval_min: 1440, status: 'ok',\n  last_run: new Date().toISOString(),\n  meta: { scanned: 0, failed: 0, no_data: 0, blocked: 0, findings: 0 }\n} }];"
+      },
+      "id": "build-empty-summary-wf-04-attack-surface.json",
+      "name": "Build Empty Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-domain",
+              "leftValue": "={{ Boolean($json.host) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-host-wf-04",
+      "name": "IF Has Hosts",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all();"
+      },
+      "id": "pass-empty-summary-wf-04",
+      "name": "Pass Empty Host Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const reachable = $('IF Has IP').all(0);\nif (reachable.length > 0) return [];\nconst skipped = $('Extract IP').all().map(item => item.json).filter(item => item.skip === true);\nconst resolveFailed = skipped.filter(item => item.skip_reason === 'resolver_error').length;\nconst blocked = skipped.filter(item => item.skip_reason === 'private_or_reserved' || item.skip_reason === 'no_public_ip').length;\nreturn [{ json: {\n  kind: 'summary',\n  job_type: 'shodan',\n  interval_min: 1440,\n  status: resolveFailed > 0 ? 'error' : 'ok',\n  last_run: new Date().toISOString(),\n  meta: { scanned: 0, failed: resolveFailed, no_data: 0, blocked, resolver_failed: resolveFailed, findings: 0 }\n} }];"
+      },
+      "id": "build-skip-summary-wf-04",
+      "name": "Build Skip Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        760
+      ]
     }
   ],
   "connections": {
-    "Cron 6h": {
+    "Cron 24h": {
       "main": [
         [
           {
-            "node": "Expire Old Assessments",
+            "node": "Get Vendors",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Find Due Vendors": {
+    "Get Vendors": {
       "main": [
         [
           {
-            "node": "IF Has Due Vendors",
+            "node": "IF Has Scan Targets",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Create Assessment": {
+    "Extract Host": {
       "main": [
         [
           {
-            "node": "Sign Portal Link",
+            "node": "IF Has Hosts",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Sign Portal Link": {
+    "Resolve IP": {
       "main": [
         [
           {
-            "node": "Prepare Invitation Email",
+            "node": "Extract IP",
             "type": "main",
             "index": 0
           }
         ]
+      ]
+    },
+    "Extract IP": {
+      "main": [
+        [
+          {
+            "node": "IF Has IP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shodan Host": {
+      "main": [
+        [
+          {
+            "node": "Analyze Surface",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has IP": {
+      "main": [
+        [
+          {
+            "node": "Shodan Host",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Skip Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Surface": {
+      "main": [
+        [
+          {
+            "node": "IF Is Finding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Is Finding": {
+      "main": [
+        [
+          {
+            "node": "Insert Finding",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Finding": {
+      "main": [
+        [
+          {
+            "node": "Notify Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Backend": {
+      "main": [
+        []
       ]
     },
     "Manual Trigger": {
       "main": [
         [
           {
-            "node": "Expire Old Assessments",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Prepare Invitation Email": {
-      "main": [
-        [
-          {
-            "node": "IF Has Contact Email",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Expire Old Assessments": {
-      "main": [
-        [
-          {
-            "node": "Find Due Vendors",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF Has Due Vendors": {
-      "main": [
-        [
-          {
-            "node": "Create Assessment",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Build Manual Completion",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF Has Contact Email": {
-      "main": [
-        [
-          {
-            "node": "Send Invitation Email",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Build Manual Completion",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Send Invitation Email": {
-      "main": [
-        [
-          {
-            "node": "Build Manual Completion",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Build Manual Completion",
+            "node": "Get Vendors",
             "type": "main",
             "index": 0
           }
@@ -441,6 +664,90 @@
           }
         ]
       ]
+    },
+    "IF Has Scan Targets": {
+      "main": [
+        [
+          {
+            "node": "Extract Host",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Empty Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Empty Summary": {
+      "main": [
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Hosts": {
+      "main": [
+        [
+          {
+            "node": "Resolve IP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pass Empty Host Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass Empty Host Summary": {
+      "main": [
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Skip Summary": {
+      "main": [
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -451,10 +758,10 @@
   "pinData": {},
   "tags": [
     {
-      "name": "scheduler"
+      "name": "monitoring"
     },
     {
-      "name": "assessments"
+      "name": "shodan"
     }
   ]
 }
