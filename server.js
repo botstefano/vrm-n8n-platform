@@ -59,6 +59,7 @@ async function authenticate(req, res, next) {
 
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data?.user) return res.status(401).json({ error: 'Sesión inválida o expirada.' });
+    if (!data.user.email_confirmed_at) return res.status(403).json({ error: 'Debes verificar el correo de tu cuenta de Supabase antes de acceder a VRM.' });
 
     // New schemas use auth.users.id as the profile ID. Existing installations may
     // have legacy UUIDs in public.users, so fall back to the verified Auth email.
@@ -67,7 +68,7 @@ async function authenticate(req, res, next) {
     if (profileError) throw profileError;
     if (!profile && data.user.email) {
       const fallback = await supabase.from('users')
-        .select('id,email,full_name,is_active').eq('email', data.user.email).maybeSingle();
+        .select('id,email,full_name,is_active').ilike('email', data.user.email).maybeSingle();
       if (fallback.error) throw fallback.error;
       profile = fallback.data;
     }
