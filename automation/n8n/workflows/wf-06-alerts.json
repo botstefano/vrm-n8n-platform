@@ -130,7 +130,13 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ text: $('Normalize Alert').first().json.slack_text }) }}",
         "options": {
-          "timeout": 10000
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
         }
       },
       "id": "slack",
@@ -293,6 +299,56 @@
           "name": "VRM Alerts Webhook Auth"
         }
       }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "slack-delivered",
+              "leftValue": "={{ Number($json.statusCode || 0) >= 200 && Number($json.statusCode || 0) < 300 }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-slack-delivered",
+      "name": "IF Slack Delivered",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, deduped: false, slackDelivered: false, error: 'Slack delivery failed; alert was not marked as deduplicated.' } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "respond-slack-failed",
+      "name": "Respond Slack Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1400,
+        80
+      ]
     }
   ],
   "connections": {
@@ -333,7 +389,7 @@
       "main": [
         [
           {
-            "node": "Slack",
+            "node": "Respond OK",
             "type": "main",
             "index": 0
           }
@@ -344,7 +400,7 @@
       "main": [
         [
           {
-            "node": "IF Requires Email",
+            "node": "IF Slack Delivered",
             "type": "main",
             "index": 0
           }
@@ -377,7 +433,7 @@
       "main": [
         [
           {
-            "node": "Respond OK",
+            "node": "Mark Dedupe 1h",
             "type": "main",
             "index": 0
           }
@@ -388,7 +444,7 @@
       "main": [
         [
           {
-            "node": "Mark Dedupe 1h",
+            "node": "Slack",
             "type": "main",
             "index": 0
           }
@@ -413,7 +469,7 @@
         ],
         [
           {
-            "node": "Respond OK",
+            "node": "Mark Dedupe 1h",
             "type": "main",
             "index": 0
           }
@@ -425,6 +481,24 @@
         [
           {
             "node": "Normalize Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Slack Delivered": {
+      "main": [
+        [
+          {
+            "node": "IF Requires Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Slack Failed",
             "type": "main",
             "index": 0
           }
