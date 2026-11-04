@@ -182,7 +182,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT u.email FROM users u\nJOIN user_roles ur ON ur.user_id = u.id\nJOIN roles r ON r.id = ur.role_id\nWHERE r.code IN ('admin','risk_analyst') AND u.is_active = true;",
+        "query": "SELECT COALESCE(array_agg(DISTINCT u.email) FILTER (WHERE u.email IS NOT NULL), ARRAY[]::text[]) AS emails\nFROM users u\nJOIN user_roles ur ON ur.user_id = u.id\nJOIN roles r ON r.id = ur.role_id\nWHERE r.code IN ('admin','risk_analyst') AND u.is_active = true;",
         "options": {}
       },
       "id": "pg-rcpt",
@@ -204,7 +204,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const list = [...new Set($input.all().map(i => i.json.email).filter(Boolean))];\nconst to = list.join(',') || $env.ALERT_FALLBACK_EMAIL || $env.SMTP_FROM;\nreturn [{ json: { to } }];"
+        "jsCode": "const row = $input.first()?.json || {};\nconst list = Array.isArray(row.emails) ? row.emails.filter(Boolean) : [];\nconst to = list.join(',') || $env.ALERT_FALLBACK_EMAIL || $env.SMTP_FROM || '';\nreturn to ? [{ json: { to } }] : [];"
       },
       "id": "join",
       "name": "Join Recipients",
