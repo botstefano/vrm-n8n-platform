@@ -328,7 +328,7 @@ async function dispatchAlertRecord(payload, reqUser = null) {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'X-Alert-Token': process.env.ALERTS_WEBHOOK_TOKEN },
         body: JSON.stringify({ ...payload, severity, fingerprint, alert_id: data.id }),
-        signal: AbortSignal.timeout(15000)
+        signal: AbortSignal.timeout(30000)
       });
       const responseBody = await response.json().catch(() => ({}));
       finalDeliveryStatus = !response.ok ? 'failed' : (responseBody.deduped ? 'deduped' : 'sent');
