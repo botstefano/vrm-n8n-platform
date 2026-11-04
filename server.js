@@ -405,6 +405,8 @@ app.post('/api/assessments/:id/complete', allowRoles('admin','risk_analyst'), as
       score, responses: req.body?.responses || {}
     }).eq('id', req.params.id).select().single();
     if (error) throw error;
+    const nextVendorStatus = score >= 75 ? 'approved' : 'conditional';
+    await supabase.from('vendors').update({ status: nextVendorStatus }).eq('id', data.vendor_id).eq('status', 'reevaluation');
     await writeAudit(req, 'complete_assessment', 'assessments', data.id, { score });
     await recalculateVendorScore(data.vendor_id);
     res.json(data);
