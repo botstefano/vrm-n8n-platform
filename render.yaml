@@ -1,5 +1,5 @@
 services:
-  # Despliegue como Static Site en Render (Recomendado: CDN global, 100% gratuito, reglas SPA)
+  # Frontend público. Las claves VITE_* son incorporadas durante el build.
   - type: web
     name: vrm-automation-platform
     runtime: static
@@ -19,3 +19,31 @@ services:
       - path: /*
         name: Referrer-Policy
         value: strict-origin-when-cross-origin
+    envVars:
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: VITE_API_BASE_URL
+        sync: false
+
+  # API privada: valida JWT/RBAC y usa la clave secreta solo en servidor.
+  - type: web
+    name: vrm-platform-api
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: VRM_FRONTEND_URL
+        sync: false
+      - key: N8N_BASE_URL
+        sync: false
+      - key: ALERTS_WEBHOOK_TOKEN
+        sync: false
+      - key: N8N_MANUAL_WEBHOOK_BASE_URL
+        sync: false
