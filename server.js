@@ -851,6 +851,24 @@ app.post('/api/cleanup', allowRoles('admin'), async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.get('/api/workflows/logs', async (_req, res, next) => {
+  try {
+    const { data, error } = await supabase.from('workflow_execution_logs')
+      .select('*').order('started_at', { ascending: false }).limit(50);
+    if (error) throw error;
+    res.json({ workflowLogs: (data || []).map((log) => ({
+      id: log.id,
+      workflowId: log.workflow_code,
+      workflowName: log.workflow_name,
+      startedAt: log.started_at,
+      completedAt: log.completed_at,
+      status: log.status,
+      summary: log.summary,
+      steps: log.details?.steps || []
+    })) });
+  } catch (error) { next(error); }
+});
+
 app.post('/api/workflows/:workflowCode/execute', allowRoles('admin','risk_analyst'), async (req, res, next) => {
   const code = String(req.params.workflowCode).toLowerCase();
   if (code === 'wf-00') return res.status(409).json({ error: 'WF-00 es un manejador de errores basado en eventos y no admite ejecución manual.' });
