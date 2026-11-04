@@ -27,4 +27,4 @@ No expongas variables privadas en el Static Site ni en variables `VITE_*`.
 
 El archivo `render.yaml` define ambos servicios. Puedes usar **New + → Blueprint** para crear el conjunto a partir del repositorio. Si ya tienes el Static Site configurado manualmente, revisa sus variables y crea el Web Service de API por separado o aplica el Blueprint teniendo cuidado de no duplicar el sitio existente.
 
-Consulta [SUPABASE_RENDER_SETUP.md](./SUPABASE_RENDER_SETUP.md) antes de realizar el despliegue.
+Consulta [SUPABASE_RENDER_SETUP.md](./SUPABASE_RENDER_SETUP.md) antes de realizar el despliegue. Para tu base Supabase ya existente, ejecuta primero `database/04-upgrade-existing-supabase.sql` y después `database/03-supabase-api-grants.sql`; no vuelvas a ejecutar el esquema inicial.
