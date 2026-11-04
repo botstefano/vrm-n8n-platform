@@ -245,7 +245,8 @@
       },
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 5000
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -350,6 +351,93 @@
         1400,
         80
       ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-06',\n  status: 'success',\n  summary: 'WF-06 completado: notificación procesada y enviada.',\n  details: { requested_by: request.requested_by || null }\n} }];"
+      },
+      "id": "manual-alert-success",
+      "name": "Build Manual Completion Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-06',\n  status: 'success',\n  summary: 'WF-06 completado: alerta duplicada y deduplicada.',\n  details: { requested_by: request.requested_by || null }\n} }];"
+      },
+      "id": "manual-alert-duplicate",
+      "name": "Build Manual Completion Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-06',\n  status: 'failed',\n  summary: 'WF-06 falló al entregar la alerta por Slack o SMTP.',\n  details: { requested_by: request.requested_by || null }\n} }];"
+      },
+      "id": "manual-alert-failed",
+      "name": "Build Manual Completion Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, deduped: false, error: 'SMTP delivery failed; alert was not marked as deduplicated.' } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "respond-email-failed",
+      "name": "Respond Email Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Signature",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "manual-alert-completion-http",
+      "name": "Report Manual Completion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2180,
+        800
+      ],
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -438,6 +526,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Respond Email Failed",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -500,6 +595,83 @@
         [
           {
             "node": "Respond Slack Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond OK": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Slack Failed": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Email Failed": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion Success": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion Duplicate": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion Failed": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
             "type": "main",
             "index": 0
           }
