@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
+import net from 'node:net';
 import { createClient } from '@supabase/supabase-js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -109,7 +110,7 @@ function normalizeVendorWebsite(value) {
     error.status = 400;
     throw error;
   }
-  const isIp = crypto.isIP(url.hostname);
+  const isIp = net.isIP(url.hostname);
   if (!['http:','https:'].includes(url.protocol) || !url.hostname ||
       url.username || url.password || (!isIp && !url.hostname.includes('.'))) {
     const error = new Error('La dirección web debe ser un dominio o IP con protocolo HTTP/HTTPS, sin credenciales.');
