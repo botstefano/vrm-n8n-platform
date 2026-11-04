@@ -26,6 +26,7 @@ interface DashboardViewProps {
   onSelectTab: (tab: NavTab) => void;
   onExecuteWorkflow: (wfId: string) => void;
   onSelectVendor: (vendorId: string) => void;
+  canWrite: boolean;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -35,7 +36,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   alerts,
   onSelectTab,
   onExecuteWorkflow,
-  onSelectVendor
+  onSelectVendor,
+  canWrite
 }) => {
   const activeVendors = vendors.filter((v) =>
     ['approved', 'conditional', 'monitoring', 'incident', 'reevaluation'].includes(v.status)
@@ -168,6 +170,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
 
+        {canWrite ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* WF-01 */}
           <button
@@ -234,6 +237,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="text-[11px] text-slate-400 mt-0.5">Recalcular todos</div>
           </button>
         </div>
+        ) : (
+          <p className="text-xs text-slate-500">El rol auditor puede consultar los resultados, pero no iniciar ejecuciones manuales.</p>
+        )}
       </div>
 
       {/* Two Columns: Vendors Snapshot & Recent Findings */}
@@ -297,12 +303,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   {dueEvaluations.length} proveedor(es) tienen reevaluación vencida o pendiente (WF-05).
                 </span>
               </div>
-              <button
-                onClick={() => onExecuteWorkflow('wf-05')}
-                className="text-xs font-semibold text-amber-400 hover:text-amber-300 underline"
-              >
-                Disparar Reevaluación
-              </button>
+              {canWrite && (
+                <button
+                  onClick={() => onExecuteWorkflow('wf-05')}
+                  className="text-xs font-semibold text-amber-400 hover:text-amber-300 underline"
+                >
+                  Disparar Reevaluación
+                </button>
+              )}
             </div>
           )}
         </div>
