@@ -80,6 +80,24 @@ jobs:
                   throw new Error(`${file}: ${builder.name} is not connected to the completion callback`);
                 }
               }
+              if (code === 'wf-06') {
+                const alertReporter = nodes.find((node) => node.name === 'Report Alert Delivery');
+                const alertBuilders = nodes.filter((node) => node.name.startsWith('Build Alert Callback'));
+                if (!alertReporter || !String(alertReporter.parameters?.url || '').includes('/api/v1/webhooks/n8n/alert-dispatched')) {
+                  throw new Error(`${file}: alert delivery callback is missing or misconfigured`);
+                }
+                if (!String(alertReporter.parameters?.headerParameters?.parameters?.find((header) => header.name === 'X-N8N-Signature')?.value || '').includes('N8N_WEBHOOK_SECRET')) {
+                  throw new Error(`${file}: alert delivery callback must use N8N_WEBHOOK_SECRET`);
+                }
+                for (const builder of alertBuilders) {
+                  const targets = Object.values(workflow.connections?.[builder.name] || {})
+                    .flat(2).map((connection) => connection.node);
+                  if (!targets.includes('Report Alert Delivery')) {
+                    throw new Error(`${file}: ${builder.name} is not connected to the alert delivery callback`);
+                  }
+                }
+                if (alertBuilders.length < 3) throw new Error(`${file}: expected sent, deduped and failed alert callbacks`);
+              }
             }
 
             for (const node of nodes) {
