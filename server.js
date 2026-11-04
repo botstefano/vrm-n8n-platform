@@ -538,7 +538,7 @@ app.post('/api/v1/webhooks/n8n/workflow-failed', requireDatabase, verifyN8nSigna
     await supabase.from('audit_log').insert({
       actor: 'n8n', action: 'workflow_failed', entity: 'n8n_workflow',
       entity_id: String(body.workflow || body.workflow_id || ''),
-      details: { node: body.node, message: body.message, execution_id: body.execution_id }
+      details: { node: body.node, message: body.message, execution_id: body.execution_id, execution_url: body.execution_url }
     });
     res.json({ received: true });
   } catch (error) { next(error); }
