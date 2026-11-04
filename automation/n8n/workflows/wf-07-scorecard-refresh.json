@@ -40,7 +40,8 @@
           "id": "postgresVrm",
           "name": "Postgres VRM"
         }
-      }
+      },
+      "alwaysOutputData": true
     },
     {
       "parameters": {
@@ -214,7 +215,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst aggregate = $('Aggregate').first().json || {};\nconst total = Number(aggregate.total || 0);\nconst ok = Number(aggregate.ok || 0);\nconst fail = Number(aggregate.fail || 0);\nconst status = fail === 0 ? 'success' : ok === 0 ? 'failed' : 'partial';\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-07',\n  status,\n  summary: 'Scorecards: ' + ok + '/' + total + ' recalculados; ' + fail + ' error(es).',\n  details: { total, ok, fail }\n} }];"
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst aggregate = $('Aggregate').isExecuted ? ($('Aggregate').first().json || {}) : ($('Build Empty Summary').first().json || {});\nconst total = Number(aggregate.total || 0);\nconst ok = Number(aggregate.ok || 0);\nconst fail = Number(aggregate.fail || 0);\nconst status = fail === 0 ? 'success' : ok === 0 ? 'failed' : 'partial';\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-07',\n  status,\n  summary: 'Scorecards: ' + ok + '/' + total + ' recalculados; ' + fail + ' error(es).',\n  details: { total, ok, fail }\n} }];"
       },
       "id": "manual-completion-code-wf-07",
       "name": "Build Manual Completion",
@@ -255,6 +256,52 @@
         520
       ],
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-active-vendors",
+              "leftValue": "={{ Boolean($json.id) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-active-vendors",
+      "name": "IF Has Active Vendors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        620,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  job_type: 'scorecard_refresh_all',\n  interval_min: 60,\n  status: 'ok',\n  last_run: new Date().toISOString(),\n  total: 0,\n  ok: 0,\n  fail: 0,\n  meta: { total: 0, ok: 0, fail: 0 }\n} }];"
+      },
+      "id": "build-empty-summary-wf-07",
+      "name": "Build Empty Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        560
+      ]
     }
   ],
   "connections": {
@@ -273,7 +320,7 @@
       "main": [
         [
           {
-            "node": "Recalc Scorecard",
+            "node": "IF Has Active Vendors",
             "type": "main",
             "index": 0
           }
@@ -352,6 +399,40 @@
         [
           {
             "node": "Report Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Active Vendors": {
+      "main": [
+        [
+          {
+            "node": "Recalc Scorecard",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Empty Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Empty Summary": {
+      "main": [
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Manual Completion",
             "type": "main",
             "index": 0
           }
