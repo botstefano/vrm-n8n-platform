@@ -38,3 +38,5 @@ export async function apiRequest<T = any>(
   if (!response.ok) throw new Error(payload.error || `Error de API HTTP ${response.status}`);
   return payload as T;
 }
+
+export function isApiConfigured(): boolean { return Boolean(API_BASE_URL); }
