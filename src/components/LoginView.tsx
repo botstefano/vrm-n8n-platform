@@ -88,7 +88,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ configured, apiConfigured,
 
           <button
             type="submit"
-            disabled={!configured || loading || !email.trim() || !password}
+            disabled={!configured || !apiConfigured || loading || !email.trim() || !password}
             className="w-full rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed py-2.5 text-sm font-semibold text-white transition-colors flex items-center justify-center gap-2"
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <LockKeyhole className="w-4 h-4" />}
