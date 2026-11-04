@@ -45,7 +45,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const out = [];\nfor (const it of $input.all()) {\n  const v = it.json;\n  try {\n    const u = new URL(/^https?:\\/\\//i.test(v.website) ? v.website : 'https://' + v.website);\n    const domain = u.hostname.replace(/^www\\./i, '').toLowerCase();\n    if (!domain.includes('.')) continue;\n    out.push({ json: { vendor_id: v.id, legal_name: v.legal_name, domain } });\n  } catch (e) { /* URL inválida: se ignora */ }\n}\nif (!out.length) {\n  return [{ json: {\n    kind: 'summary',\n    job_type: 'ct_log',\n    interval_min: 1440,\n    status: 'ok',\n    last_run: new Date().toISOString(),\n    meta: { domains: items.length, ok: 0, failed: 0, findings: 0, invalid_websites: items.length, lookback_days: Number($env.CT_LOOKBACK_DAYS || 3) }\n  } }];\n}\nreturn out;"
+        "jsCode": "const items = $input.all().filter(it => it.json && it.json.id && it.json.website);\nconst out = [];\nfor (const it of items) {\n  const v = it.json;\n  try {\n    const u = new URL(/^https?:\\/\\//i.test(v.website) ? v.website : 'https://' + v.website);\n    const domain = u.hostname.replace(/^www\\./i, '').toLowerCase();\n    if (!domain.includes('.')) continue;\n    out.push({ json: { vendor_id: v.id, legal_name: v.legal_name, domain } });\n  } catch (e) { /* URL inválida: se ignora */ }\n}\nif (!out.length) {\n  return [{ json: {\n    kind: 'summary',\n    job_type: 'ct_log',\n    interval_min: 1440,\n    status: 'ok',\n    last_run: new Date().toISOString(),\n    meta: { domains: items.length, ok: 0, failed: 0, findings: 0, invalid_websites: items.length, lookback_days: Number($env.CT_LOOKBACK_DAYS || 3) }\n  } }];\n}\nreturn out;"
       },
       "id": "extract",
       "name": "Extract Domain",
