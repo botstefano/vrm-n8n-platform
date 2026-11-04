@@ -138,4 +138,29 @@ insert into public.roles (code, name) values
   ('auditor', 'Auditor')
 on conflict (code) do update set name = excluded.name;
 
+-- Cerrar el acceso directo por Data API para roles de navegador.
+-- La API Express valida JWT/RBAC y usa service_role; el portal público también pasa por Express.
+alter table public.users enable row level security;
+alter table public.roles enable row level security;
+alter table public.user_roles enable row level security;
+alter table public.vendors enable row level security;
+alter table public.vendor_technologies enable row level security;
+alter table public.questionnaires enable row level security;
+alter table public.assessments enable row level security;
+alter table public.vendor_findings enable row level security;
+alter table public.monitoring_jobs enable row level security;
+alter table public.audit_log enable row level security;
+alter table public.audit_log_archive enable row level security;
+alter table public.score_history enable row level security;
+alter table public.alert_notifications enable row level security;
+alter table public.workflow_execution_logs enable row level security;
+
+revoke all privileges on all tables in schema public from anon, authenticated;
+revoke all privileges on all sequences in schema public from anon, authenticated;
+
+alter default privileges for role postgres in schema public
+  revoke all privileges on tables from anon, authenticated;
+alter default privileges for role postgres in schema public
+  revoke all privileges on sequences from anon, authenticated;
+
 commit;
