@@ -246,6 +246,9 @@ class VrmStore {
       // If severity escalated, update and alert
       if (existing.severity !== findingData.severity && existing.status !== 'closed') {
         existing.severity = findingData.severity;
+        this.remote(apiRequest(`/api/findings/${existing.id}`, {
+          method: 'PATCH', body: { severity: findingData.severity }
+        }));
         this.logAudit(`n8n:${findingData.source}`, 'escalate_finding', 'vendor_findings', existing.id, {
           title: existing.title,
           newSeverity: findingData.severity
