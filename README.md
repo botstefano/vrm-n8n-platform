@@ -18,7 +18,7 @@ La API utiliza la Secret key de Supabase exclusivamente en servidor. El navegado
 1. **Dashboard ejecutivo:** métricas de proveedores, niveles de riesgo, hallazgos y jobs.
 2. **Proveedores y tecnologías:** inventario de terceros, criticidad, contacto de seguridad y CPE 2.3.
 3. **Hallazgos:** gestión de CVEs, CT Logs, expiración TLS, superficie de ataque y hallazgos manuales.
-4. **Evaluaciones:** cuestionarios internos, respuestas y puntuaciones persistidas.
+4. **Evaluaciones:** cuestionarios, enlaces HMAC de un solo uso para proveedores, respuestas y puntuaciones persistidas.
 5. **Alertas:** registro de notificaciones y estado de entrega (pending, sent, deduped, failed).
 6. **Automatización:** catálogo WF-00 a WF-10 y disparadores manuales mediante webhooks.
 7. **Salud:** comprobación de conectividad con la API y Supabase, además de seguimiento de jobs.
@@ -64,4 +64,4 @@ La guía de configuración completa está en [SUPABASE_RENDER_SETUP.md](./SUPABA
 
 No incluyas claves secretas, contraseñas de PostgreSQL ni tokens privados en GitHub o en variables `VITE_*`. La Secret key de Supabase debe permanecer solo en el entorno del backend.
 
-El portal público de proveedores basado en enlaces HMAC y el registro final de resultados de ejecución de n8n requieren trabajo adicional antes de considerarse terminados. La integración de servicios externos también depende de las credenciales reales configuradas en Render, Supabase y n8n.
+El portal público de proveedores valida enlaces HMAC firmados con expiración y un solo uso; el proveedor responde sin iniciar sesión en el panel administrativo. Las ejecuciones manuales de n8n registran su aceptación, pero la finalización/error final todavía requiere instrumentar callbacks de cierre para cada workflow. La integración de servicios externos depende de las credenciales reales configuradas en Render, Supabase y n8n.
