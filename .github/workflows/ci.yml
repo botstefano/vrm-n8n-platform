@@ -157,6 +157,15 @@ jobs:
             throw new Error('WF-01 must report incomplete scans when the pagination limit is reached');
           }
 
+          const health = JSON.parse(fs.readFileSync(`${path}/wf-08-health-check.json`, 'utf8'));
+          const healthQuery = health.nodes.find((node) => node.name === 'Get Job Status');
+          const healthCode = health.nodes.find((node) => node.name === 'Detect Problems')?.parameters?.jsCode || '';
+          if (!healthQuery?.parameters?.query?.includes('workflow_execution_logs') ||
+              !healthQuery?.parameters?.options?.queryReplacement?.includes('WORKFLOW_STALE_HOURS') ||
+              !healthCode.includes('staleExecutions')) {
+            throw new Error('WF-08 must recover manual executions that never report completion');
+          }
+
           const tls = JSON.parse(fs.readFileSync(`${path}/wf-03-tls-expiry.json`, 'utf8'));
           const tlsInsert = tls.nodes.find((node) => node.name === 'Insert Finding');
           const tlsQuery = tlsInsert?.parameters?.query || '';
