@@ -207,6 +207,8 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
                                 {copiedPortalId === asm.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                               </button>
                             </>
+                          ) : asm.status === 'expired' ? (
+                            <span className="text-[10px] text-amber-400">Enlace caducado</span>
                           ) : asm.status !== 'completed' ? (
                             <span className="text-[10px] text-slate-500">Enlace pendiente</span>
                           ) : (
