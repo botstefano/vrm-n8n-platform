@@ -60,7 +60,22 @@ Una vez creado el Web Service, copia su URL pública y colócala en `VITE_API_BA
 
 ## 2. Supabase
 
-Para un proyecto nuevo, ejecuta en este orden `database/01-schema.sql`, opcionalmente `database/02-seed.sql` y finalmente `database/03-supabase-api-grants.sql`. **En el proyecto `vrm-n8n-platform` que ya configuraste, no vuelvas a ejecutar el esquema inicial:** ya ejecutaste su versión equivalente desde el archivo que te entregué en esta conversación. En tu proyecto existente ejecuta únicamente `database/03-supabase-api-grants.sql` desde Supabase SQL Editor. Esta migración concede privilegios Data API únicamente a `service_role`, que es el rol usado por la Secret key del backend; no habilita acceso directo a `anon` ni `authenticated`. En proyectos Supabase recientes, las tablas nuevas pueden no quedar expuestas automáticamente al Data API, por lo que esta concesión explícita es necesaria. La cuenta de cada usuario debe existir en Supabase Authentication y en `public.users`, con un rol relacionado en `public.user_roles`.
+Para un proyecto nuevo, ejecuta en este orden `database/01-schema.sql`, `database/02-seed.sql`, `database/04-upgrade-existing-supabase.sql` y finalmente `database/03-supabase-api-grants.sql`. El paso 04 es idempotente y deja preparadas las columnas del portal, sincroniza cuentas Auth existentes, configura el trigger de nuevos usuarios y activa RLS.
+
+**En tu proyecto `vrm-n8n-platform` que ya tenía aplicado el esquema anterior, no vuelvas a ejecutar `database/01-schema.sql` ni borres tablas.** Ejecuta únicamente `database/04-upgrade-existing-supabase.sql` y después `database/03-supabase-api-grants.sql` desde Supabase SQL Editor. La migración 04 amplía las tablas existentes sin eliminar datos, conserva los UUID históricos de `public.users` y mantiene sus relaciones de roles. La API busca el perfil por el ID Auth y, para perfiles históricos, por el correo verificado de Supabase Auth. También activa RLS y revoca el acceso directo a las tablas para `anon` y `authenticated`; el navegador solo accede a Auth y el tráfico de negocio pasa por Express. La migración 03 concede permisos Data API a `service_role`, rol utilizado exclusivamente por la Secret key del backend.
+
+Después de crear la cuenta en Supabase Authentication, comprueba que aparece en `public.users` y asígnale un rol de VRM desde SQL Editor. Sustituye el correo de ejemplo por la dirección real registrada:
+
+```sql
+insert into public.user_roles (user_id, role_id)
+select u.id, r.id
+from public.users u
+join public.roles r on r.code = 'admin'
+where lower(u.email) = lower('tu-correo@empresa.com')
+on conflict do nothing;
+```
+
+Asigna `admin` solo a la cuenta administradora inicial. Para el resto de cuentas utiliza `risk_analyst` o `auditor` según corresponda. Sin un rol en `public.user_roles`, la API rechazará el acceso aunque la autenticación de Supabase sea correcta.
 
 Para el backend, copia el Project URL y la Secret key desde Project Settings / API Keys. La Secret key mapea a `service_role`, omite RLS y solo debe estar en el Web Service privado después de las validaciones de sesión y RBAC. No compartas esas credenciales en tickets, capturas o commits.
 
