@@ -109,6 +109,110 @@ function verifyN8nSignature(req, res, next) {
   next();
 }
 
+function createPortalToken(payload) {
+  const secret = process.env.PORTAL_TOKEN_SECRET;
+  if (!secret) {
+    const error = new Error('PORTAL_TOKEN_SECRET no está configurado en el backend.');
+    error.status = 503;
+    throw error;
+  }
+  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(encoded).digest('base64url');
+  const token = encoded + '.' + signature;
+  return {
+    token,
+    hash: crypto.createHash('sha256').update(token).digest('hex'),
+    expiresAt: new Date(Number(payload.exp)).toISOString()
+  };
+}
+
+function verifyPortalToken(token) {
+  const secret = process.env.PORTAL_TOKEN_SECRET;
+  if (!secret) {
+    const error = new Error('PORTAL_TOKEN_SECRET no está configurado en el backend.');
+    error.status = 503;
+    throw error;
+  }
+  if (typeof token !== 'string' || token.length > 4096) {
+    const error = new Error('Enlace de evaluación no válido.');
+    error.status = 400;
+    throw error;
+  }
+  const parts = token.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    const error = new Error('Enlace de evaluación no válido.');
+    error.status = 400;
+    throw error;
+  }
+  const expected = crypto.createHmac('sha256', secret).update(parts[0]).digest('base64url');
+  const expectedBuffer = Buffer.from(expected);
+  const suppliedBuffer = Buffer.from(parts[1]);
+  if (expectedBuffer.length !== suppliedBuffer.length || !crypto.timingSafeEqual(expectedBuffer, suppliedBuffer)) {
+    const error = new Error('La firma del enlace de evaluación no es válida.');
+    error.status = 401;
+    throw error;
+  }
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+  } catch {
+    const error = new Error('El contenido del enlace de evaluación no es válido.');
+    error.status = 400;
+    throw error;
+  }
+  if (!payload?.aid || !payload?.vid || !Number.isFinite(Number(payload.exp))) {
+    const error = new Error('El contenido del enlace de evaluación está incompleto.');
+    error.status = 400;
+    throw error;
+  }
+  if (Number(payload.exp) <= Date.now()) {
+    const error = new Error('El enlace de evaluación ha caducado.');
+    error.status = 410;
+    throw error;
+  }
+  return payload;
+}
+
+function buildPortalLink(assessment) {
+  if (!assessment?.portal_token_hash || !assessment?.token_expires_at || !process.env.PORTAL_TOKEN_SECRET) return null;
+  const exp = new Date(assessment.token_expires_at).getTime();
+  const payload = { aid: assessment.id, vid: assessment.vendor_id, exp };
+  const { token, hash } = createPortalToken(payload);
+  if (hash !== assessment.portal_token_hash) return null;
+  const base = (FRONTEND_ORIGINS[0] || process.env.VRM_PORTAL_URL || '').replace(/\\/$/, '');
+  return base ? base + '/portal/assessment/' + token : null;
+}
+
+async function loadPublicAssessment(token) {
+  const payload = verifyPortalToken(token);
+  const hash = crypto.createHash('sha256').update(token).digest('hex');
+  const { data: assessment, error } = await supabase.from('assessments').select('*')
+    .eq('id', payload.aid).eq('vendor_id', payload.vid).eq('portal_token_hash', hash).maybeSingle();
+  if (error) throw error;
+  if (!assessment) {
+    const missing = new Error('El enlace no existe, fue revocado o ya se utilizó.');
+    missing.status = 404;
+    throw missing;
+  }
+  if (!assessment.token_expires_at || new Date(assessment.token_expires_at).getTime() <= Date.now()) {
+    const expired = new Error('El enlace de evaluación ha caducado.');
+    expired.status = 410;
+    throw expired;
+  }
+  if (!['pending', 'in_progress'].includes(assessment.status)) {
+    const completed = new Error('Esta evaluación ya no admite respuestas.');
+    completed.status = 410;
+    throw completed;
+  }
+  const [{ data: vendor, error: vendorError }, { data: questionnaire, error: questionnaireError }] = await Promise.all([
+    supabase.from('vendors').select('id,legal_name').eq('id', assessment.vendor_id).single(),
+    supabase.from('questionnaires').select('id,name,version,definition').eq('id', assessment.questionnaire_id).single()
+  ]);
+  if (vendorError) throw vendorError;
+  if (questionnaireError) throw questionnaireError;
+  return { assessment, vendor, questionnaire };
+}
+
 async function recalculateVendorScore(vendorId) {
   const [{ data: vendor, error: vendorError }, { data: findings, error: findingsError }, { data: assessments, error: assessmentsError }] = await Promise.all([
     supabase.from('vendors').select('*').eq('id', vendorId).single(),
