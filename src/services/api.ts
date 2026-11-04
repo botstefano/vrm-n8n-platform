@@ -40,3 +40,25 @@ export async function apiRequest<T = any>(
 }
 
 export function isApiConfigured(): boolean { return Boolean(API_BASE_URL); }
+
+export async function publicApiRequest<T = any>(
+  path: string,
+  options: { method?: string; body?: unknown } = {}
+): Promise<T> {
+  if (!API_BASE_URL) throw new Error('La API VRM todavía no está configurada.');
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (options.body !== undefined) headers['Content-Type'] = 'application/json';
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method: options.method || 'GET',
+      headers,
+      body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    });
+  } catch {
+    throw new Error('No se pudo conectar con el servicio de evaluaciones.');
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `Error de API HTTP ${response.status}`);
+  return payload as T;
+}
