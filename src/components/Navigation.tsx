@@ -31,6 +31,8 @@ interface NavigationProps {
   activeRole: string;
   onSelectRole: (role: string) => void;
   onQuickRun: () => void;
+  userEmail: string;
+  onSignOut: () => void;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({
@@ -40,7 +42,9 @@ export const Navigation: React.FC<NavigationProps> = ({
   alertsCount,
   activeRole,
   onSelectRole,
-  onQuickRun
+  onQuickRun,
+  userEmail,
+  onSignOut
 }) => {
   const tabs: { id: NavTab; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: 'dashboard', label: 'Resumen Ejecutivo', icon: <LayoutDashboard className="w-4 h-4" /> },
@@ -86,32 +90,12 @@ export const Navigation: React.FC<NavigationProps> = ({
               <span>Ejecutar Escaneos</span>
             </button>
 
-            {/* Role Switcher */}
-            <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700 text-xs text-slate-300">
-              <span className="text-slate-500 text-[11px]">Rol:</span>
-              <select
-                value={activeRole}
-                onChange={(e) => onSelectRole(e.target.value)}
-                aria-label="Rol activo de usuario"
-                className="bg-transparent text-slate-200 font-medium focus:outline-none cursor-pointer"
-              >
-                <option value="admin" className="bg-slate-900 text-slate-100">Admin (CISO)</option>
-                <option value="risk_analyst" className="bg-slate-900 text-slate-100">Analista de Riesgo</option>
-                <option value="auditor" className="bg-slate-900 text-slate-100">Auditor</option>
-              </select>
+            <div className="hidden md:flex flex-col items-end text-right leading-tight max-w-[210px]">
+              <span className="text-xs font-semibold text-slate-200 truncate">{userEmail}</span>
+              <span className="text-[10px] text-cyan-300">Rol: {activeRole}</span>
             </div>
-
-            {/* Reset Store Button */}
-            <button
-              onClick={() => {
-                if (window.confirm('¿Reiniciar todos los datos a la configuración inicial del seed?')) {
-                  store.resetToDefaults();
-                }
-              }}
-              title="Restablecer datos originales de 02-seed.sql"
-              className="px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors"
-            >
-              Reset Seed
+            <button onClick={onSignOut} className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800">
+              Cerrar sesión
             </button>
           </div>
         </div>
