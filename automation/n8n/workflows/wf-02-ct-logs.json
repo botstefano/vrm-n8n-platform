@@ -1,5 +1,5 @@
 {
-  "name": "WF-02 CT Logs (crt.sh)",
+  "name": "WF-03 TLS Certificate Expiry",
   "nodes": [
     {
       "parameters": {
@@ -23,105 +23,38 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT id, legal_name, website FROM vendors WHERE status IN ('approved','conditional','monitoring','incident','reevaluation') AND website IS NOT NULL;",
-        "options": {}
-      },
-      "id": "pg-vendors",
-      "name": "Get Vendors",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        460,
-        300
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "postgresVrm",
-          "name": "Postgres VRM"
-        }
-      },
-      "alwaysOutputData": true
-    },
-    {
-      "parameters": {
-        "jsCode": "const items = $input.all().filter(it => it.json && it.json.id && it.json.website);\nconst out = [];\nfor (const it of items) {\n  const v = it.json;\n  try {\n    const u = new URL(/^https?:\\/\\//i.test(v.website) ? v.website : 'https://' + v.website);\n    const domain = u.hostname.replace(/^www\\./i, '').toLowerCase();\n    if (!domain.includes('.')) continue;\n    out.push({ json: { vendor_id: v.id, legal_name: v.legal_name, domain } });\n  } catch (e) { /* URL inválida: se ignora */ }\n}\nif (!out.length) {\n  return [{ json: {\n    kind: 'summary',\n    job_type: 'ct_log',\n    interval_min: 1440,\n    status: 'ok',\n    last_run: new Date().toISOString(),\n    meta: { domains: items.length, ok: 0, failed: 0, findings: 0, invalid_websites: items.length, lookback_days: Number($vars.CT_LOOKBACK_DAYS || 3) }\n  } }];\n}\nreturn out;"
-      },
-      "id": "extract",
-      "name": "Extract Domain",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        700,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "method": "GET",
-        "url": "https://crt.sh/",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "q",
-              "value": "=%.{{ $json.domain }}"
-            },
-            {
-              "name": "output",
-              "value": "json"
-            },
-            {
-              "name": "exclude",
-              "value": "expired"
-            },
-            {
-              "name": "deduplicate",
-              "value": "Y"
-            }
-          ]
-        },
+        "method": "POST",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/tls-scan",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({}) }}",
         "options": {
-          "timeout": 60000,
-          "batching": {
-            "batch": {
-              "batchSize": 1,
-              "batchInterval": 2000
-            }
-          },
+          "timeout": 180000,
           "response": {
             "response": {
               "fullResponse": true,
               "neverError": true
             }
           }
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
-      "id": "crt",
-      "name": "crt.sh Query",
+      "id": "probe",
+      "name": "Probe TLS",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        940,
+        700,
         300
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 10000,
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "jsCode": "const LOOKBACK_DAYS = Number($vars.CT_LOOKBACK_DAYS || 3);\nconst cutoff = Date.now() - LOOKBACK_DAYS * 86400000;\nconst SUSPICIOUS = /(^|\\.)(dev|test|stage|staging|uat|admin|vpn|internal|jenkins|git|gitlab|vault)(\\d*)\\./i;\nconst toTs = s => new Date(/Z$|[+-]\\d\\d:?\\d\\d$/.test(s) ? s : s + 'Z').getTime();\nconst items = $input.all();\nconst out = [];\nlet failed = 0, ok = 0;\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json;\n  const v = $('Extract Domain').itemMatching(i).json;\n  if (!resp || resp.statusCode !== 200 || !Array.isArray(resp.body)) { failed++; continue; }\n  ok++;\n  const seen = new Set();\n  const recent = resp.body.filter(c => c.entry_timestamp && toTs(c.entry_timestamp) >= cutoff)\n                          .filter(c => !seen.has(c.id) && seen.add(c.id)).slice(0, 25);\n  for (const c of recent) {\n    const names = [...new Set(String(c.name_value || '').split('\\n').map(s => s.trim()).filter(Boolean))];\n    const suspicious = names.filter(n => SUSPICIOUS.test(n + '.'));\n    const issuer = (String(c.issuer_name || '').match(/O=([^,]+)/) || [])[1] || c.issuer_name || 'n/a';\n    out.push({ json: {\n      kind: 'finding', vendor_id: v.vendor_id, source: 'ct_log', source_ref: 'ct:' + c.id,\n      title: ('Nuevo certificado emitido para ' + (c.common_name || v.domain) + ' (' + issuer + ')').slice(0, 300),\n      description: 'Dominios: ' + names.slice(0, 20).join(', ') +\n        (suspicious.length ? ' · Posibles hosts no productivos/administrativos: ' + suspicious.slice(0, 10).join(', ') : ''),\n      severity: suspicious.length ? 'medium' : 'low',\n      evidence: { crtsh_id: c.id, serial: c.serial_number, issuer: c.issuer_name, names: names.slice(0, 50),\n                  not_before: c.not_before, not_after: c.not_after, logged_at: c.entry_timestamp }\n    }});\n  }\n}\nconst findings = out.length;\nout.push({ json: { kind: 'summary', job_type: 'ct_log', interval_min: 1440,\n  status: failed === 0 ? 'ok' : (ok === 0 ? 'error' : 'partial'),\n  meta: { domains: items.length, ok, failed, findings, lookback_days: LOOKBACK_DAYS } } });\nreturn out;"
-      },
-      "id": "parse",
-      "name": "Parse Certs",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1180,
-        300
-      ]
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
     },
     {
       "parameters": {
@@ -152,14 +85,14 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1420,
+        940,
         300
       ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO vendor_findings\n  (vendor_id, source, source_ref, title, description, severity, status, evidence, detected_at, due_date)\nVALUES ($1::uuid, $2, $3, $4, $5, $6::finding_severity, 'open'::finding_status, $7::jsonb, now(),\n  now() + CASE $6::finding_severity\n    WHEN 'critical'::finding_severity THEN INTERVAL '7 days'\n    WHEN 'high'::finding_severity THEN INTERVAL '14 days'\n    WHEN 'medium'::finding_severity THEN INTERVAL '30 days'\n    ELSE INTERVAL '60 days' END)\nON CONFLICT (vendor_id, source, source_ref) DO UPDATE\nSET severity = EXCLUDED.severity,\n    title = EXCLUDED.title,\n    description = EXCLUDED.description,\n    evidence = EXCLUDED.evidence,\n    status = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN 'open'::finding_status ELSE vendor_findings.status END,\n    closed_at = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN NULL ELSE vendor_findings.closed_at END,\n    resolution = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN NULL ELSE vendor_findings.resolution END,\n    due_date = CASE\n      WHEN vendor_findings.status = 'closed' THEN EXCLUDED.due_date\n      ELSE COALESCE(LEAST(vendor_findings.due_date, EXCLUDED.due_date), vendor_findings.due_date, EXCLUDED.due_date)\n    END,\n    updated_at = now()\nWHERE vendor_findings.status = 'closed'\n   OR CASE EXCLUDED.severity\n        WHEN 'critical'::finding_severity THEN 5\n        WHEN 'high'::finding_severity THEN 4\n        WHEN 'medium'::finding_severity THEN 3\n        WHEN 'low'::finding_severity THEN 2\n        ELSE 1\n      END\n      > CASE vendor_findings.severity\n        WHEN 'critical'::finding_severity THEN 5\n        WHEN 'high'::finding_severity THEN 4\n        WHEN 'medium'::finding_severity THEN 3\n        WHEN 'low'::finding_severity THEN 2\n        ELSE 1\n      END\nRETURNING id, vendor_id, source, source_ref, title, description, severity;",
+        "query": "WITH retired_legacy_tls AS (\n  UPDATE vendor_findings\n     SET status = 'closed'::finding_status,\n         closed_at = now(),\n         resolution = 'superseded_tls_severity_reference',\n         updated_at = now()\n   WHERE vendor_id = $1::uuid\n     AND source = 'tls_expiry'\n     AND left(\n       source_ref,\n       length('tls:' || ($7::jsonb ->> 'host') || ':' || ($7::jsonb ->> 'port') || ':')\n     ) = 'tls:' || ($7::jsonb ->> 'host') || ':' || ($7::jsonb ->> 'port') || ':'\n     AND source_ref <> $3\n     AND status <> 'closed'\n  RETURNING id\n)\nINSERT INTO vendor_findings\n  (vendor_id, source, source_ref, title, description, severity, status, evidence, detected_at, due_date)\nVALUES ($1::uuid, $2, $3, $4, $5, $6::finding_severity, 'open'::finding_status, $7::jsonb, now(),\n  now() + CASE $6::finding_severity\n    WHEN 'critical'::finding_severity THEN INTERVAL '7 days'\n    WHEN 'high'::finding_severity THEN INTERVAL '14 days'\n    WHEN 'medium'::finding_severity THEN INTERVAL '30 days'\n    ELSE INTERVAL '60 days' END)\nON CONFLICT (vendor_id, source, source_ref) DO UPDATE\nSET severity = EXCLUDED.severity,\n    title = EXCLUDED.title,\n    description = EXCLUDED.description,\n    evidence = EXCLUDED.evidence,\n    status = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN 'open'::finding_status ELSE vendor_findings.status END,\n    closed_at = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN NULL ELSE vendor_findings.closed_at END,\n    resolution = CASE WHEN vendor_findings.status IN ('closed','accepted') THEN NULL ELSE vendor_findings.resolution END,\n    due_date = CASE\n      WHEN vendor_findings.status = 'closed' THEN EXCLUDED.due_date\n      ELSE COALESCE(LEAST(vendor_findings.due_date, EXCLUDED.due_date), vendor_findings.due_date, EXCLUDED.due_date)\n    END,\n    updated_at = now()\nWHERE vendor_findings.status = 'closed'\n   OR CASE EXCLUDED.severity\n        WHEN 'critical'::finding_severity THEN 5\n        WHEN 'high'::finding_severity THEN 4\n        WHEN 'medium'::finding_severity THEN 3\n        WHEN 'low'::finding_severity THEN 2\n        ELSE 1\n      END\n      > CASE vendor_findings.severity\n        WHEN 'critical'::finding_severity THEN 5\n        WHEN 'high'::finding_severity THEN 4\n        WHEN 'medium'::finding_severity THEN 3\n        WHEN 'low'::finding_severity THEN 2\n        ELSE 1\n      END\nRETURNING id, vendor_id, source, source_ref, title, description, severity;",
         "options": {
           "queryReplacement": "={{ [$json.vendor_id, $json.source, $json.source_ref, $json.title, $json.description, $json.severity, JSON.stringify($json.evidence || {})] }}"
         }
@@ -169,7 +102,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        1660,
+        1180,
         100
       ],
       "credentials": {
@@ -191,7 +124,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ finding_id: $json.id, vendor_id: $json.vendor_id, severity: $json.severity, source: $json.source, source_ref: $json.source_ref, title: $json.title, description: $json.description }) }}",
         "options": {
-          "timeout": 10000
+          "timeout": 40000
         },
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
@@ -201,7 +134,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1900,
+        1420,
         100
       ],
       "retryOnFail": true,
@@ -228,7 +161,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        1660,
+        1180,
         500
       ],
       "credentials": {
@@ -242,7 +175,7 @@
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "vrm-manual/wf-02",
+        "path": "vrm-manual/wf-03",
         "authentication": "headerAuth",
         "responseMode": "onReceived",
         "options": {}
@@ -255,7 +188,7 @@
         220,
         520
       ],
-      "webhookId": "vrm-manual-wf-02",
+      "webhookId": "vrm-manual-wf-03",
       "credentials": {
         "httpHeaderAuth": {
           "id": "httpHeaderAlerts",
@@ -265,9 +198,9 @@
     },
     {
       "parameters": {
-        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst summary = $('Parse Certs').isExecuted\n  ? ($('Parse Certs').all().map(item => item.json).find(item => item.kind === 'summary') || {})\n  : $('Pass Empty Host Summary').isExecuted\n    ? $('Pass Empty Host Summary').first().json\n    : $('Build Empty Summary').first().json;\nconst meta = summary.meta || {};\nconst resultStatus = summary.status === 'error' ? 'failed' : summary.status === 'partial' ? 'partial' : 'success';\nconst findings = Number(meta.findings || 0);\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-02',\n  status: resultStatus,\n  summary: 'Escaneo Certificate Transparency completado: ' + findings + ' hallazgo(s) procesado(s).',\n  details: meta\n} }];"
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst summary = $('Expand TLS Results').isExecuted\n  ? ($('Expand TLS Results').all().map(item => item.json).find(item => item.kind === 'summary') || {})\n  : {};\nconst meta = summary.meta || {};\nconst resultStatus = summary.status === 'error' ? 'failed' : summary.status === 'partial' ? 'partial' : 'success';\nconst findings = Number(meta.findings || 0);\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-03',\n  status: resultStatus,\n  summary: 'Escaneo TLS completado: ' + findings + ' hallazgo(s) procesado(s).',\n  details: meta\n} }];"
       },
-      "id": "manual-completion-code-wf-02",
+      "id": "manual-completion-code-wf-03",
       "name": "Build Manual Completion",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -290,7 +223,7 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
-      "id": "manual-completion-http-wf-02",
+      "id": "manual-completion-http-wf-03",
       "name": "Report Manual Completion",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -307,96 +240,18 @@
       }
     },
     {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "has-target",
-              "leftValue": "={{ Boolean($json.id) }}",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "if-has-target-wf-02-ct-logs.json",
-      "name": "IF Has Scan Targets",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        680,
-        120
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "return [{ json: {\n  kind: 'summary', job_type: 'ct_log', interval_min: 1440, status: 'ok',\n  last_run: new Date().toISOString(),\n  meta: { domains: 0, ok: 0, failed: 0, findings: 0, lookback_days: Number($vars.CT_LOOKBACK_DAYS || 3) }\n} }];"
-      },
-      "id": "build-empty-summary-wf-02-ct-logs.json",
-      "name": "Build Empty Summary",
+      "id": "expand-tls-results",
+      "name": "Expand TLS Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         920,
-        520
-      ]
-    },
-    {
+        320
+      ],
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "has-domain",
-              "leftValue": "={{ Boolean($json.domain) }}",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "if-has-host-wf-02",
-      "name": "IF Has Domains",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        680,
-        520
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "return $input.all();"
-      },
-      "id": "pass-empty-summary-wf-02",
-      "name": "Pass Empty Host Summary",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        920,
-        760
-      ]
+        "mode": "runOnceForAllItems",
+        "jsCode": "const response = $input.first()?.json?.body || $input.first()?.json || {};\nconst findings = Array.isArray(response.findings) ? response.findings : [];\nconst summary = response.summary || {\n  kind: 'summary',\n  job_type: 'tls_expiry',\n  interval_min: 1440,\n  status: 'error',\n  meta: { total: 0, checked: 0, failed: 1, blocked: 0, findings: 0 }\n};\nreturn [\n  ...findings.map(finding => ({ json: { kind: 'finding', ...finding } })),\n  { json: { ...summary, kind: 'summary' } }\n];"
+      }
     }
   ],
   "connections": {
@@ -404,51 +259,18 @@
       "main": [
         [
           {
-            "node": "Get Vendors",
+            "node": "Probe TLS",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Get Vendors": {
+    "Probe TLS": {
       "main": [
         [
           {
-            "node": "IF Has Scan Targets",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Extract Domain": {
-      "main": [
-        [
-          {
-            "node": "IF Has Domains",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "crt.sh Query": {
-      "main": [
-        [
-          {
-            "node": "Parse Certs",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse Certs": {
-      "main": [
-        [
-          {
-            "node": "IF Is Finding",
+            "node": "Expand TLS Results",
             "type": "main",
             "index": 0
           }
@@ -498,7 +320,7 @@
       "main": [
         [
           {
-            "node": "Get Vendors",
+            "node": "Probe TLS",
             "type": "main",
             "index": 0
           }
@@ -516,68 +338,11 @@
         ]
       ]
     },
-    "IF Has Scan Targets": {
+    "Expand TLS Results": {
       "main": [
         [
           {
-            "node": "Extract Domain",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Build Empty Summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Empty Summary": {
-      "main": [
-        [
-          {
-            "node": "Log Run",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Build Manual Completion",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF Has Domains": {
-      "main": [
-        [
-          {
-            "node": "crt.sh Query",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Pass Empty Host Summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Pass Empty Host Summary": {
-      "main": [
-        [
-          {
-            "node": "Log Run",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Build Manual Completion",
+            "node": "IF Is Finding",
             "type": "main",
             "index": 0
           }
@@ -596,7 +361,7 @@
       "name": "monitoring"
     },
     {
-      "name": "ct-logs"
+      "name": "tls"
     }
   ]
 }

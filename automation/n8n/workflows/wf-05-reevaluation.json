@@ -1,83 +1,53 @@
 {
-  "name": "WF-05 Re-evaluation Scheduler",
+  "name": "WF-06 Alerts Multi-channel",
   "nodes": [
     {
       "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "hours",
-              "hoursInterval": 6
-            }
-          ]
-        }
+        "httpMethod": "POST",
+        "path": "vrm-alerts",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
       },
-      "id": "cron",
-      "name": "Cron 6h",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.2,
+      "id": "webhook",
+      "name": "Webhook Alert",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "position": [
         220,
+        300
+      ],
+      "webhookId": "vrm-alerts-webhook",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "httpHeaderAlerts",
+          "name": "VRM Alerts Webhook Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst allowed = ['critical', 'high', 'medium', 'low', 'info'];\nconst s = String(b.severity || 'medium').toLowerCase();\nconst severity = allowed.includes(s) ? s : 'medium';\nconst route = (severity === 'critical' || severity === 'high') ? 'slack+email' : 'slack';\nconst title = String(b.title || 'Alerta sin título').slice(0, 300);\nconst fingerprint = b.fingerprint || [b.source || 'unknown', b.source_ref || title, b.vendor_id || '', severity].join(':');\nconst alert_id = b.alert_id || null;\nconst vendor_id = b.vendor_id || null;\nconst source = b.source || null;\nconst source_ref = b.source_ref || null;\nconst description = b.description || null;\nconst front = String($vars.VRM_FRONTEND_URL || $vars.VRM_BACKEND_URL || '').replace(/\\/$/, '');\nconst esc = x => String(x == null ? '' : x).replace(/[&<>\"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst slackEsc = x => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst link = b.vendor_id ? front + '/vendors/' + b.vendor_id : front;\nconst slack_text = ':rotating_light: *[' + severity.toUpperCase() + ']* ' + slackEsc(title) +\n  (b.vendor_id ? '\\nProveedor: `' + slackEsc(b.vendor_id) + '`' : '') +\n  '\\nFuente: ' + slackEsc(b.source || 'n/a') + (b.source_ref ? ' · ' + slackEsc(b.source_ref) : '') +\n  (b.description ? '\\n' + slackEsc(String(b.description).slice(0, 500)) : '') +\n  (link ? '\\n<' + link + '|Ver en VRM>' : '');\nconst email_html = '<h2>Alerta VRM</h2>' +\n  '<p><b>Severidad:</b> ' + esc(severity) + '</p>' +\n  '<p><b>Título:</b> ' + esc(title) + '</p>' +\n  (b.vendor_id ? '<p><b>Proveedor:</b> ' + esc(b.vendor_id) + '</p>' : '') +\n  '<p><b>Fuente:</b> ' + esc(b.source || 'n/a') + ' — ' + esc(b.source_ref || '') + '</p>' +\n  (b.description ? '<p>' + esc(String(b.description).slice(0, 1000)) + '</p>' : '') +\n  (link ? '<p><a href=\"' + esc(link) + '\">Ver en VRM</a></p>' : '');\nreturn [{ json: { alert_id, vendor_id, source, source_ref, description, severity, route, title, fingerprint, slack_text,\n  email_subject: '[' + severity.toUpperCase() + '] VRM Alert: ' + title, email_html } }];"
+      },
+      "id": "normalize",
+      "name": "Normalize Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
         300
       ]
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT v.id, v.legal_name, v.criticality, v.current_risk,\n       v.primary_contact->>'email' AS email,\n       CASE WHEN v.criticality >= 4 THEN 90 WHEN v.criticality = 3 THEN 180 ELSE 365 END AS interval_days\nFROM vendors v\nWHERE (\n    (v.status IN ('approved','conditional','monitoring') AND (v.next_evaluation IS NULL OR v.next_evaluation <= now()))\n    OR (v.status = 'reevaluation' AND EXISTS (\n      SELECT 1 FROM assessments expired\n      WHERE expired.vendor_id = v.id AND expired.status = 'expired'\n    ))\n  )\n  AND NOT EXISTS (SELECT 1 FROM assessments a\n                  WHERE a.vendor_id = v.id AND a.status IN ('pending','in_progress'))\nORDER BY v.criticality DESC, v.next_evaluation NULLS FIRST\nLIMIT 50;",
-        "options": {}
-      },
-      "id": "pg-due",
-      "name": "Find Due Vendors",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        460,
-        300
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "postgresVrm",
-          "name": "Postgres VRM"
-        }
-      },
-      "alwaysOutputData": true
-    },
-    {
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "WITH a AS (\n  INSERT INTO assessments (vendor_id, questionnaire_id, status, started_at)\n  SELECT $1::uuid, q.id, 'pending', now()\n  FROM questionnaires q WHERE q.is_active = true\n  ORDER BY q.version DESC LIMIT 1\n  RETURNING id, vendor_id\n), v AS (\n  UPDATE vendors\n     SET status = 'reevaluation'::vendor_status,\n         next_evaluation = now() + make_interval(days => $2::int),\n         updated_at = now()\n   WHERE id = $1::uuid AND EXISTS (SELECT 1 FROM a)\n  RETURNING id\n)\nSELECT a.id AS assessment_id, a.vendor_id FROM a JOIN v ON v.id = a.vendor_id;",
-        "options": {
-          "queryReplacement": "={{ [$json.id, $json.interval_days] }}"
-        }
-      },
-      "id": "pg-reeval",
-      "name": "Create Assessment",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        700,
-        300
-      ],
-      "credentials": {
-        "postgres": {
-          "id": "postgresVrm",
-          "name": "Postgres VRM"
-        }
-      },
-      "retryOnFail": true,
-      "maxTries": 2
-    },
-    {
-      "parameters": {
         "method": "POST",
-        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/assessment-link",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/slack-delivery",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ assessment_id: $json.assessment_id, vendor_id: $json.vendor_id }) }}",
+        "jsonBody": "={{ JSON.stringify({ text: $('Normalize Alert').first().json.slack_text }) }}",
         "options": {
-          "timeout": 15000,
+          "timeout": 20000,
           "response": {
             "response": {
               "fullResponse": true,
@@ -88,14 +58,18 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
-      "id": "link",
-      "name": "Sign Portal Link",
+      "id": "slack",
+      "name": "Slack",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        940,
-        300
+        1420,
+        100
       ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
       "credentials": {
         "httpHeaderAuth": {
           "id": "vrmBackendCallbackAuth",
@@ -105,57 +79,90 @@
     },
     {
       "parameters": {
-        "httpMethod": "POST",
-        "path": "vrm-manual/wf-05",
-        "authentication": "headerAuth",
-        "responseMode": "onReceived",
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Normalize Alert').first().json.route }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "slack+email"
+            }
+          ],
+          "combinator": "and"
+        },
         "options": {}
       },
-      "id": "manual-webhook",
-      "name": "Manual Trigger",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 2,
+      "id": "if-email",
+      "name": "IF Requires Email",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
       "position": [
-        220,
-        520
-      ],
-      "webhookId": "vrm-manual-wf-05",
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "httpHeaderAlerts",
-          "name": "VRM Alerts Webhook Auth"
-        }
-      }
+        1660,
+        100
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const escapeHtml = (value) => String(value || '').replace(/[&<>\"']/g, (c) => ({\n  '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'\n}[c]));\nreturn $('Sign Portal Link').all()\n  .map(entry => entry.json.body || entry.json)\n  .map(item => ({\n    json: {\n      email_present: Boolean(item.email && item.link),\n      to: item.email || '',\n      subject: 'Evaluación de seguridad de proveedores - VRM',\n      html: '<div style=\"font-family:Arial,sans-serif;max-width:640px;margin:auto;padding:24px;color:#0f172a\">' +\n        '<h2>Evaluación de seguridad de proveedores</h2>' +\n        '<p>Hola,</p>' +\n        '<p>Se solicita completar la evaluación de seguridad de <strong>' + escapeHtml(item.legal_name) + '</strong>.</p>' +\n        '<p>Utiliza el siguiente enlace seguro, válido durante 30 días y de un solo uso:</p>' +\n        '<p><a href=\"' + escapeHtml(item.link) + '\" style=\"display:inline-block;padding:12px 18px;background:#0891b2;color:#fff;text-decoration:none;border-radius:6px\">Completar evaluación</a></p>' +\n        '<p style=\"font-size:12px;color:#64748b\">Si no esperabas esta solicitud, contacta al equipo responsable de gestión de proveedores.</p>' +\n        '</div>'\n    }\n  }));"
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(array_agg(DISTINCT u.email) FILTER (WHERE u.email IS NOT NULL), ARRAY[]::text[]) AS emails\nFROM users u\nJOIN user_roles ur ON ur.user_id = u.id\nJOIN roles r ON r.id = ur.role_id\nWHERE r.code IN ('admin','risk_analyst') AND u.is_active = true;",
+        "options": {}
       },
-      "id": "prepare-invitation",
-      "name": "Prepare Invitation Email",
+      "id": "pg-rcpt",
+      "name": "Get Recipients",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1900,
+        -100
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first()?.json || {};\nconst emails = Array.isArray(row.emails) ? row.emails.filter(Boolean) : [];\nconst fallback = String($vars.ALERT_FALLBACK_EMAIL || '').trim();\nconst to = emails.length ? emails.join(',') : fallback;\nif (!to) {\n  throw new Error('Alerta crítica/alta: no existen destinatarios RBAC activos. Configura ALERT_FALLBACK_EMAIL en n8n.');\n}\nreturn [{ json: { to } }];"
+      },
+      "id": "join",
+      "name": "Join Recipients",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1420,
-        300
-      ]
+        2140,
+        -100
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "fromEmail": "={{ $vars.SMTP_FROM }}",
         "toEmail": "={{ $json.to }}",
-        "subject": "={{ $json.subject }}",
+        "subject": "={{ $('Normalize Alert').first().json.email_subject }}",
         "emailFormat": "html",
-        "html": "={{ $json.html }}",
+        "html": "={{ $('Normalize Alert').first().json.email_html }}",
         "options": {}
       },
-      "id": "send-invitation-email",
-      "name": "Send Invitation Email",
+      "id": "smtp",
+      "name": "Send Email",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        1660,
-        300
+        2380,
+        -100
       ],
       "credentials": {
         "smtp": {
@@ -170,22 +177,40 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "WITH expired AS (\n  UPDATE assessments\n     SET status = 'expired', portal_token_hash = NULL, token_expires_at = NULL\n   WHERE status IN ('pending','in_progress')\n     AND token_expires_at IS NOT NULL\n     AND token_expires_at <= now()\n  RETURNING id\n)\nSELECT COUNT(*)::int AS expired_assessments FROM expired;",
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, deduped: false } }}",
         "options": {}
       },
-      "id": "expire-assessments",
-      "name": "Expire Old Assessments",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
+      "id": "respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
       "position": [
-        460,
-        120
+        2620,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vrm-manual/wf-06",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "manual-webhook",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        520
       ],
+      "webhookId": "vrm-manual-wf-06",
       "credentials": {
-        "postgres": {
-          "id": "postgresVrm",
-          "name": "Postgres VRM"
+        "httpHeaderAuth": {
+          "id": "httpHeaderAlerts",
+          "name": "VRM Alerts Webhook Auth"
         }
       }
     },
@@ -200,8 +225,8 @@
           },
           "conditions": [
             {
-              "id": "has-vendor",
-              "leftValue": "={{ Boolean($json.id) }}",
+              "id": "slack-delivered",
+              "leftValue": "={{ Number($json.statusCode || 0) >= 200 && Number($json.statusCode || 0) < 300 }}",
               "operator": {
                 "type": "boolean",
                 "operation": "true",
@@ -213,59 +238,73 @@
         },
         "options": {}
       },
-      "id": "if-has-due-vendors",
-      "name": "IF Has Due Vendors",
+      "id": "if-slack-delivered",
+      "name": "IF Slack Delivered",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        700,
-        120
+        1160,
+        300
       ]
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "has-email",
-              "leftValue": "={{ $json.email_present === true }}",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, deduped: false, slackDelivered: false, error: 'Slack delivery failed; alert was not marked as deduplicated.' } }}",
+        "options": {
+          "responseCode": 502
+        }
       },
-      "id": "if-has-contact-email",
-      "name": "IF Has Contact Email",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
+      "id": "respond-slack-failed",
+      "name": "Respond Slack Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
       "position": [
-        1900,
-        120
+        1400,
+        80
       ]
     },
     {
       "parameters": {
-        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst due = $('Find Due Vendors').all().map(item => item.json).filter(item => item.id);\nconst signed = $('Sign Portal Link').isExecuted ? $('Sign Portal Link').all().map(item => item.json.body || item.json) : [];\nconst expectedEmails = signed.filter(item => item.email && item.link).length;\nconst missingEmails = Math.max(0, signed.length - expectedEmails);\nconst inputErrors = $input.all().some(item => Boolean(item.json?.error || item.json?.errorMessage));\nconst emailNode = $('Send Invitation Email');\nconst emailResults = emailNode.isExecuted ? emailNode.all() : [];\nconst sentEmails = inputErrors ? 0 : emailResults.length;\nconst status = inputErrors ? 'failed' : missingEmails > 0 ? 'partial' : 'success';\nlet summary;\nif (due.length === 0) summary = 'No había proveedores con reevaluación vencida.';\nelse if (inputErrors) summary = 'Se crearon ' + signed.length + ' evaluación(es), pero falló la entrega de correo.';\nelse summary = 'Evaluaciones creadas: ' + signed.length + '; correos enviados: ' + sentEmails + '; contactos sin email: ' + missingEmails + '.';\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-05',\n  status,\n  summary,\n  details: { due_vendors: due.length, invitations_created: signed.length, emails_expected: expectedEmails, emails_sent: sentEmails, missing_contact_emails: missingEmails, email_error: inputErrors }\n} }];"
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-06',\n  status: 'success',\n  summary: 'WF-06 completado: notificación procesada y enviada.',\n  details: { requested_by: request.requested_by || null }\n} }];"
       },
-      "id": "manual-completion-code-wf-05",
-      "name": "Build Manual Completion",
+      "id": "manual-alert-success",
+      "name": "Build Manual Completion Success",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2380,
-        520
+        1940,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-06',\n  status: 'failed',\n  summary: 'WF-06 falló al entregar la alerta por Slack o SMTP.',\n  details: { requested_by: request.requested_by || null }\n} }];"
+      },
+      "id": "manual-alert-failed",
+      "name": "Build Manual Completion Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, deduped: false, slackDelivered: true, emailDelivered: false, error: 'Email recipient lookup or SMTP delivery failed; alert was not marked as deduplicated.' } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "respond-email-failed",
+      "name": "Respond Email Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        600
       ]
     },
     {
@@ -282,13 +321,13 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth"
       },
-      "id": "manual-completion-http-wf-05",
+      "id": "manual-alert-completion-http",
       "name": "Report Manual Completion",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        2620,
-        520
+        2180,
+        800
       ],
       "onError": "continueRegularOutput",
       "credentials": {
@@ -297,47 +336,180 @@
           "name": "VRM Backend Callback Auth"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $('Normalize Alert').first().json || {};\nreturn [{ json: {\n  alert_id: alert.alert_id || null,\n  vendor_id: alert.vendor_id || null,\n  severity: alert.severity,\n  delivery_status: 'sent',\n  title: alert.title,\n  fingerprint: alert.fingerprint,\n  source: alert.source || null,\n  source_ref: alert.source_ref || null,\n  description: alert.description || null,\n  details: { route: alert.route, slack: 'sent', email: alert.route === 'slack+email' ? 'sent' : 'not_required' }\n} }];"
+      },
+      "id": "alert-callback-sent",
+      "name": "Build Alert Callback Sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/alert-dispatched",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "report-alert-delivery",
+      "name": "Report Alert Delivery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        1080
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $('Normalize Alert').first().json || {};\nreturn [{ json: {\n  alert_id: alert.alert_id || null,\n  vendor_id: alert.vendor_id || null,\n  severity: alert.severity,\n  delivery_status: 'failed',\n  title: alert.title,\n  fingerprint: alert.fingerprint,\n  source: alert.source || null,\n  source_ref: alert.source_ref || null,\n  description: alert.description || null,\n  details: { route: alert.route, slack: 'failed', email: alert.route === 'slack+email' ? 'not_attempted' : 'not_required' }\n} }];"
+      },
+      "id": "alert-callback-slack-failed",
+      "name": "Build Alert Callback Slack Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        1440
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $('Normalize Alert').first().json || {};\nreturn [{ json: {\n  alert_id: alert.alert_id || null,\n  vendor_id: alert.vendor_id || null,\n  severity: alert.severity,\n  delivery_status: 'failed',\n  title: alert.title,\n  fingerprint: alert.fingerprint,\n  source: alert.source || null,\n  source_ref: alert.source_ref || null,\n  description: alert.description || null,\n  details: { route: alert.route, slack: 'sent', email: 'failed' }\n} }];"
+      },
+      "id": "alert-callback-email-failed",
+      "name": "Build Alert Callback Email Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        1620
+      ]
     }
   ],
   "connections": {
-    "Cron 6h": {
+    "Webhook Alert": {
       "main": [
         [
           {
-            "node": "Expire Old Assessments",
+            "node": "Normalize Alert",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Find Due Vendors": {
+    "Normalize Alert": {
       "main": [
         [
           {
-            "node": "IF Has Due Vendors",
+            "node": "Slack",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Create Assessment": {
+    "Slack": {
       "main": [
         [
           {
-            "node": "Sign Portal Link",
+            "node": "IF Slack Delivered",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Sign Portal Link": {
+    "Get Recipients": {
       "main": [
         [
           {
-            "node": "Prepare Invitation Email",
+            "node": "Join Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Email Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Join Recipients": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Email Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Email Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Requires Email": {
+      "main": [
+        [
+          {
+            "node": "Get Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond OK",
             "type": "main",
             "index": 0
           }
@@ -348,94 +520,128 @@
       "main": [
         [
           {
-            "node": "Expire Old Assessments",
+            "node": "Normalize Alert",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Prepare Invitation Email": {
+    "IF Slack Delivered": {
       "main": [
         [
           {
-            "node": "IF Has Contact Email",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Expire Old Assessments": {
-      "main": [
-        [
-          {
-            "node": "Find Due Vendors",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF Has Due Vendors": {
-      "main": [
-        [
-          {
-            "node": "Create Assessment",
+            "node": "IF Requires Email",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Build Manual Completion",
+            "node": "Respond Slack Failed",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "IF Has Contact Email": {
+    "Respond OK": {
       "main": [
         [
           {
-            "node": "Send Invitation Email",
+            "node": "Build Manual Completion Success",
             "type": "main",
             "index": 0
-          }
-        ],
-        [
+          },
           {
-            "node": "Build Manual Completion",
+            "node": "Build Alert Callback Sent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Send Invitation Email": {
+    "Respond Slack Failed": {
       "main": [
         [
           {
-            "node": "Build Manual Completion",
+            "node": "Build Manual Completion Failed",
             "type": "main",
             "index": 0
-          }
-        ],
-        [
+          },
           {
-            "node": "Build Manual Completion",
+            "node": "Build Alert Callback Slack Failed",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Build Manual Completion": {
+    "Respond Email Failed": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion Failed",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Alert Callback Email Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion Success": {
       "main": [
         [
           {
             "node": "Report Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion Failed": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert Callback Sent": {
+      "main": [
+        [
+          {
+            "node": "Report Alert Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert Callback Slack Failed": {
+      "main": [
+        [
+          {
+            "node": "Report Alert Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert Callback Email Failed": {
+      "main": [
+        [
+          {
+            "node": "Report Alert Delivery",
             "type": "main",
             "index": 0
           }
@@ -451,10 +657,7 @@
   "pinData": {},
   "tags": [
     {
-      "name": "scheduler"
-    },
-    {
-      "name": "assessments"
+      "name": "alerts"
     }
   ]
 }
