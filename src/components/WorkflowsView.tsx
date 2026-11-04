@@ -406,14 +406,27 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                     <div key={log.id} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
                       <div className="flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          {log.status === 'success' ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          ) : log.status === 'failed' ? (
+                            <AlertCircle className="w-4 h-4 text-rose-400" />
+                          ) : log.status === 'partial' ? (
+                            <AlertCircle className="w-4 h-4 text-amber-400" />
+                          ) : (
+                            <Clock className="w-4 h-4 text-cyan-400" />
+                          )}
                           <span className="font-mono font-bold text-slate-200">{log.id}</span>
                           <span className="text-slate-500">·</span>
                           <span className="text-slate-400">
                             {new Date(log.startedAt).toLocaleTimeString()}
                           </span>
                         </div>
-                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold">
+                        <span className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded border font-bold ${
+                            log.status === 'success' ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                            : log.status === 'failed' ? 'bg-rose-950 text-rose-300 border-rose-800'
+                            : log.status === 'partial' ? 'bg-amber-950 text-amber-300 border-amber-800'
+                            : 'bg-cyan-950 text-cyan-300 border-cyan-800'
+                          }`}>
                           {log.status}
                         </span>
                       </div>
