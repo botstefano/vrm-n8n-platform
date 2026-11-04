@@ -331,17 +331,14 @@ async function dispatchAlertRecord(payload, reqUser = null) {
       });
       const responseBody = await response.json().catch(() => ({}));
       finalDeliveryStatus = !response.ok ? 'failed' : (responseBody.deduped ? 'deduped' : 'sent');
-      const { error: deliveryError } = await supabase.from('alert_notifications').update({
-        delivery_status: finalDeliveryStatus,
-        delivery_meta: { http_status: response.status, response: responseBody }
-      }).eq('id', data.id);
+      // WF-06 also reports its delivery result with the signed callback. Update only
+      // the status here so we cannot overwrite richer callback metadata in a race.
+      const { error: deliveryError } = await supabase.from('alert_notifications')
+        .update({ delivery_status: finalDeliveryStatus }).eq('id', data.id);
       if (deliveryError) console.error('No se pudo actualizar el estado de la alerta:', deliveryError.message);
     } catch (error) {
       finalDeliveryStatus = 'failed';
-      await supabase.from('alert_notifications').update({
-        delivery_status: 'failed',
-        delivery_meta: { error: String(error.message || error) }
-      }).eq('id', data.id);
+      await supabase.from('alert_notifications').update({ delivery_status: 'failed' }).eq('id', data.id);
     }
   }
   return { ...data, delivery_status: finalDeliveryStatus, status: finalDeliveryStatus, timestamp: data.created_at, vendor_name: null, email_subject: null, email_html: null, slack_text: null };
@@ -503,8 +500,10 @@ app.post('/api/v1/webhooks/n8n/alert-dispatched', requireDatabase, verifyN8nSign
       return;
     }
 
-    const vendorId = body.vendor_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(body.vendor_id))
-      ? body.vendor_id : null;
+    if (body.vendor_id && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(body.vendor_id))) {
+      return res.status(400).json({ error: 'vendor_id no es un UUID válido.' });
+    }
+    const vendorId = body.vendor_id || null;
     const { data, error } = await supabase.from('alert_notifications').insert({
       vendor_id: vendorId,
       severity,
