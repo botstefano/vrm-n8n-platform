@@ -41,9 +41,13 @@ export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive }) 
     );
   });
 
-  const handleRunCleanup = () => {
-    const res = store.runCleanupAndArchive(90, 1);
-    setCleanupResult(res);
+  const handleRunCleanup = async () => {
+    try {
+      const result = await store.runCleanupAndArchive(90, 5);
+      setCleanupResult(result);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'No se pudo ejecutar la limpieza.');
+    }
   };
 
   const handleExportJson = () => {
