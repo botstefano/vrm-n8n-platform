@@ -59,9 +59,9 @@ Una vez creado el Web Service, copia su URL pública y colócala en `VITE_API_BA
 
 ## 2. Supabase
 
-El proyecto debe tener ejecutado el esquema inicial `supabase_vrm_initial_schema.sql`. La cuenta de cada usuario debe existir en Supabase Authentication y en `public.users`, con un rol relacionado en `public.user_roles`.
+El proyecto debe tener ejecutado el esquema inicial `supabase_vrm_initial_schema.sql`. Además, ejecuta `database/03-supabase-api-grants.sql` desde Supabase SQL Editor. Esta segunda migración concede privilegios Data API únicamente a `service_role`, que es el rol usado por la Secret key del backend; no habilita acceso directo a `anon` ni `authenticated`. En proyectos Supabase recientes, las tablas nuevas pueden no quedar expuestas automáticamente al Data API, por lo que esta concesión explícita es necesaria. La cuenta de cada usuario debe existir en Supabase Authentication y en `public.users`, con un rol relacionado en `public.user_roles`.
 
-Para el backend, copia el Project URL y la Secret key desde Project Settings / API Keys. No compartas esas credenciales en tickets, capturas o commits.
+Para el backend, copia el Project URL y la Secret key desde Project Settings / API Keys. La Secret key mapea a `service_role`, omite RLS y solo debe estar en el Web Service privado después de las validaciones de sesión y RBAC. No compartas esas credenciales en tickets, capturas o commits.
 
 ## 3. n8n y workflows
 
