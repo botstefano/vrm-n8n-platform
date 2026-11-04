@@ -134,6 +134,20 @@ export function App() {
     };
   }, [session?.access_token, publicAssessmentToken]);
 
+  useEffect(() => {
+    if (!session?.access_token) return;
+    const pollRunningWorkflows = async () => {
+      if (!store.getWorkflowLogs().some((log) => log.status === 'running')) return;
+      try {
+        await store.hydrateWorkflowLogs();
+      } catch (error) {
+        console.warn('No se pudo actualizar el historial de n8n:', error);
+      }
+    };
+    const intervalId = window.setInterval(() => { void pollRunningWorkflows(); }, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [session?.access_token]);
+
   const handleLogin = async (email: string, password: string) => {
     setLoginLoading(true);
     setLoginError(null);
