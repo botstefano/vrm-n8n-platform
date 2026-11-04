@@ -1,26 +1,40 @@
--- Datos de ejemplo SOLO para pruebas locales. No ejecutar en producción.
-INSERT INTO roles (code, name) VALUES ('admin','Administrador'), ('risk_analyst','Analista de riesgo'), ('auditor','Auditor')
-ON CONFLICT (code) DO NOTHING;
+-- VRM Platform — datos de configuración iniciales.
+-- Ejecutar después de database/01-schema.sql. No crea usuarios ficticios;
+-- las cuentas se crean en Supabase Authentication y se sincronizan mediante trigger.
 
-INSERT INTO users (email, full_name) VALUES
-  ('admin@vrm.local','Admin VRM'), ('analista@vrm.local','Analista VRM'), ('auditor@vrm.local','Auditor VRM')
-ON CONFLICT (email) DO NOTHING;
+insert into public.roles (code, name) values
+  ('admin', 'Administrador'),
+  ('risk_analyst', 'Analista de riesgo'),
+  ('auditor', 'Auditor')
+on conflict (code) do update set name = excluded.name;
 
-INSERT INTO user_roles (user_id, role_id)
-SELECT u.id, r.id FROM users u JOIN roles r ON
-  (u.email='admin@vrm.local' AND r.code='admin') OR
-  (u.email='analista@vrm.local' AND r.code='risk_analyst') OR
-  (u.email='auditor@vrm.local' AND r.code='auditor')
-ON CONFLICT DO NOTHING;
-
-INSERT INTO questionnaires (name, version, is_active) VALUES ('Cuestionario de seguridad estándar', 1, true);
-
-INSERT INTO vendors (legal_name, website, status, criticality, current_risk, current_score, next_evaluation, primary_contact) VALUES
-  ('GitHub, Inc.',        'https://github.com',      'approved',    4, 'low',    82.5, now() - INTERVAL '1 day', '{"email":"security@github.example"}'),
-  ('Cloudflare, Inc.',    'https://www.cloudflare.com','monitoring', 5, 'medium', 64.0, now() + INTERVAL '30 days', '{"email":"security@cloudflare.example"}'),
-  ('Example Corp',        'https://example.com',     'conditional', 2, 'high',   38.0, NULL, '{}');
-
-INSERT INTO vendor_technologies (vendor_id, product_name, cpe_match)
-SELECT id, 'nginx', 'cpe:2.3:a:nginx:nginx:*:*:*:*:*:*:*:*' FROM vendors WHERE legal_name = 'Cloudflare, Inc.';
-INSERT INTO vendor_technologies (vendor_id, product_name, cpe_match)
-SELECT id, 'OpenSSL', 'cpe:2.3:a:openssl:openssl:*:*:*:*:*:*:*:*' FROM vendors WHERE legal_name = 'GitHub, Inc.';
+insert into public.questionnaires (name, version, is_active, definition)
+values (
+  'Cuestionario de seguridad estándar (ISO 27001 / SOC 2)',
+  1,
+  true,
+  $$
+  {
+    "sections": [
+      {
+        "id": "governance",
+        "title": "Gobernanza y Políticas de Seguridad",
+        "questions": [
+          {"id": "q1-1", "text": "¿Cuenta la organización con una certificación SOC 2 Tipo II o ISO 27001 vigente?", "weight": 25},
+          {"id": "q1-2", "text": "¿Se revisan las políticas de seguridad al menos anualmente?", "weight": 15}
+        ]
+      },
+      {
+        "id": "access",
+        "title": "Cifrado y Gestión de Accesos",
+        "questions": [
+          {"id": "q2-1", "text": "¿Se exige MFA en todos los accesos administrativos?", "weight": 25},
+          {"id": "q2-2", "text": "¿Los datos se cifran en tránsito y en reposo?", "weight": 20},
+          {"id": "q2-3", "text": "¿Existe rotación automatizada de credenciales y secretos de API?", "weight": 15}
+        ]
+      }
+    ]
+  }
+  $$::jsonb
+)
+on conflict (name, version) do nothing;
