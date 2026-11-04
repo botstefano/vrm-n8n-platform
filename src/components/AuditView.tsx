@@ -13,15 +13,20 @@ import {
   ShieldCheck,
   RefreshCw
 } from 'lucide-react';
-import { AuditLogEntry } from '../types';
+import { AuditLogEntry, Vendor, VendorTechnology, VendorFinding, Assessment, ScoreHistoryEntry } from '../types';
 
 interface AuditViewProps {
   auditLog: AuditLogEntry[];
   auditArchive: AuditLogEntry[];
+  vendors: Vendor[];
+  technologies: VendorTechnology[];
+  findings: VendorFinding[];
+  assessments: Assessment[];
+  scoreHistory: ScoreHistoryEntry[];
   onExecuteWorkflow: (workflowId: string) => Promise<void>;
 }
 
-export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive, onExecuteWorkflow }) => {
+export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive, vendors, technologies, findings, assessments, scoreHistory, onExecuteWorkflow }) => {
   const [activeTab, setActiveTab] = useState<'live' | 'archive'>('live');
   const [searchTerm, setSearchTerm] = useState('');
   const [cleanupRequested, setCleanupRequested] = useState(false);
@@ -48,13 +53,13 @@ export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive, on
 
   const handleExportJson = () => {
     const exportData = {
-      vendors: store.getVendors(),
-      technologies: store.getTechnologies(),
-      findings: store.getFindings(),
-      assessments: store.getAssessments(),
-      auditLog: store.getAuditLog(),
-      auditArchive: store.getAuditArchive(),
-      scoreHistory: store.getScoreHistory(),
+      vendors,
+      technologies,
+      findings,
+      assessments,
+      auditLog,
+      auditArchive,
+      scoreHistory,
       exportedAt: new Date().toISOString()
     };
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
