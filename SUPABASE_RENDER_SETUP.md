@@ -12,7 +12,7 @@ Después de integrar esta rama en la rama que utiliza Render, configura dos serv
 
 Conserva el Static Site que ya tienes. Configuración:
 
-- Build command: `npm install && npm run build`
+- Build command: `npm ci && npm run build`
 - Publish directory: `dist`
 
 Variables de entorno del Static Site:
@@ -31,7 +31,7 @@ Crea un segundo servicio desde el mismo repositorio:
 
 - Name: `vrm-platform-api`
 - Runtime: Node
-- Build command: `npm install && npm run build`
+- Build command: `npm ci && npm run build`
 - Start command: `npm start`
 - Health check path: `/health`
 
