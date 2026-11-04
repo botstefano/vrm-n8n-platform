@@ -30,13 +30,14 @@ jobs:
           const path = 'automation/n8n/workflows';
           let workflowCount = 0;
           let codeNodeCount = 0;
+          const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
           for (const file of fs.readdirSync(path).filter((name) => name.endsWith('.json'))) {
             const workflow = JSON.parse(fs.readFileSync(`${path}/${file}`, 'utf8'));
             workflowCount += 1;
             for (const node of workflow.nodes || []) {
               if (node.type !== 'n8n-nodes-base.code') continue;
               try {
-                new Function(node.parameters?.jsCode || '');
+                new AsyncFunction(node.parameters?.jsCode || '');
                 codeNodeCount += 1;
               } catch (error) {
                 throw new Error(`${file} / ${node.name}: ${error.message}`);
