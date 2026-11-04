@@ -458,6 +458,43 @@ app.post('/api/v1/webhooks/n8n/workflow-failed', requireDatabase, verifyN8nSigna
   } catch (error) { next(error); }
 });
 
+app.post('/api/v1/webhooks/n8n/workflow-completed', requireDatabase, verifyN8nSignature, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const requestId = String(body.request_id || '');
+    const workflowCode = String(body.workflow_code || '').toLowerCase();
+    const status = String(body.status || '');
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+      return res.status(400).json({ error: 'request_id debe ser un UUID válido.' });
+    }
+    if (!/^wf-(0[1-9]|10)$/.test(workflowCode)) return res.status(400).json({ error: 'workflow_code no válido.' });
+    if (!['success','partial','failed'].includes(status)) return res.status(400).json({ error: 'status debe ser success, partial o failed.' });
+
+    const { data: current, error: currentError } = await supabase.from('workflow_execution_logs')
+      .select('id,details,completed_at')
+      .eq('id', requestId)
+      .eq('workflow_code', workflowCode)
+      .maybeSingle();
+    if (currentError) throw currentError;
+    if (!current) return res.status(404).json({ error: 'No existe una ejecución manual con ese request_id.' });
+    if (current.completed_at) return res.json({ received: true, alreadyCompleted: true });
+
+    const details = {
+      ...(current.details || {}),
+      result: body.details && typeof body.details === 'object' ? body.details : {},
+      callback_received_at: new Date().toISOString()
+    };
+    const { error: updateError } = await supabase.from('workflow_execution_logs').update({
+      status,
+      completed_at: new Date().toISOString(),
+      summary: String(body.summary || `Workflow ${workflowCode.toUpperCase()} finalizó: ${status}.`).slice(0, 1000),
+      details
+    }).eq('id', requestId).eq('workflow_code', workflowCode);
+    if (updateError) throw updateError;
+    res.json({ received: true, requestId, status });
+  } catch (error) { next(error); }
+});
+
 app.use('/api', requireDatabase, authenticate);
 
 app.get('/api/health', async (_req, res, next) => {
@@ -812,7 +849,7 @@ app.post('/api/cleanup', allowRoles('admin'), async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.post('/api/workflows/:workflowCode/execute', allowRoles('admin','risk_analyst'), async (req, res) => {
+app.post('/api/workflows/:workflowCode/execute', allowRoles('admin','risk_analyst'), async (req, res, next) => {
   const code = String(req.params.workflowCode).toLowerCase();
   if (code === 'wf-00') return res.status(409).json({ error: 'WF-00 es un manejador de errores basado en eventos y no admite ejecución manual.' });
   if (!/^wf-(0[1-9]|10)$/.test(code)) return res.status(400).json({ error: 'Código de workflow no válido.' });
@@ -820,22 +857,45 @@ app.post('/api/workflows/:workflowCode/execute', allowRoles('admin','risk_analys
   if (!process.env.N8N_MANUAL_WEBHOOK_BASE_URL || !process.env.ALERTS_WEBHOOK_TOKEN) {
     return res.status(503).json({ error: 'Configura N8N_MANUAL_WEBHOOK_BASE_URL y ALERTS_WEBHOOK_TOKEN en Render, e importa los workflows actualizados en n8n.' });
   }
+
+  const requestId = crypto.randomUUID();
+  const startedAt = new Date().toISOString();
   try {
+    const { error: logError } = await supabase.from('workflow_execution_logs').insert({
+      id: requestId,
+      workflow_code: code,
+      workflow_name: code.toUpperCase(),
+      started_at: startedAt,
+      status: 'running',
+      summary: 'Solicitud enviada a n8n; esperando el resultado final.',
+      details: { request_id: requestId, requested_by: req.user.email, manual: true }
+    });
+    if (logError) throw logError;
+
     const url = process.env.N8N_MANUAL_WEBHOOK_BASE_URL.replace(/\/$/, '') + '/' + encodeURIComponent(code);
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'X-Alert-Token': process.env.ALERTS_WEBHOOK_TOKEN },
-      body: JSON.stringify({ requested_by: req.user.email, workflow_code: code })
+      body: JSON.stringify({ requested_by: req.user.email, workflow_code: code, request_id: requestId })
     });
     const responseText = await response.text();
-    if (!response.ok) return res.status(502).json({ error: `n8n respondió con HTTP ${response.status}: ${responseText.slice(0, 300)}` });
-    await supabase.from('workflow_execution_logs').insert({
-      workflow_code: code, workflow_name: code.toUpperCase(), status: 'running',
-      summary: 'Webhook manual aceptado por n8n.',
-      details: { requested_by: req.user.email, response: responseText.slice(0, 500) }
-    });
-    res.json({ status: 'accepted', workflowCode: code, message: 'Webhook aceptado por n8n.' });
-  } catch (error) { res.status(502).json({ error: error.message || 'No se pudo contactar con n8n.' }); }
+    if (!response.ok) {
+      await supabase.from('workflow_execution_logs').update({
+        status: 'failed', completed_at: new Date().toISOString(),
+        summary: `n8n respondió con HTTP ${response.status}.`,
+        details: { request_id: requestId, requested_by: req.user.email, response: responseText.slice(0, 500) }
+      }).eq('id', requestId);
+      return res.status(502).json({ error: `n8n respondió con HTTP ${response.status}: ${responseText.slice(0, 300)}` });
+    }
+    res.json({ status: 'accepted', workflowCode: code, requestId, message: 'Webhook aceptado por n8n.' });
+  } catch (error) {
+    await supabase.from('workflow_execution_logs').update({
+      status: 'failed', completed_at: new Date().toISOString(),
+      summary: 'No se pudo iniciar la ejecución en n8n.',
+      details: { request_id: requestId, requested_by: req.user.email, error: String(error.message || error).slice(0, 500) }
+    }).eq('id', requestId);
+    next(error);
+  }
 });
 
 // Static frontend support is useful when this repository is deployed as a single Web Service.
