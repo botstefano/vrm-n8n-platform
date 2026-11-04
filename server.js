@@ -181,6 +181,14 @@ async function dispatchAlertRecord(payload, reqUser = null) {
 
 app.use('/api', requireDatabase, authenticate);
 
+app.get('/api/health', async (_req, res, next) => {
+  try {
+    const { error } = await supabase.from('roles').select('id', { head: true, count: 'exact' });
+    if (error) throw error;
+    res.json({ status: 'online', database: 'connected', checkedAt: new Date().toISOString() });
+  } catch (error) { next(error); }
+});
+
 app.get('/api/bootstrap', async (req, res, next) => {
   try {
     const { data: activeQuestionnaires, error: questionnaireError } = await supabase
@@ -235,7 +243,12 @@ app.get('/api/bootstrap', async (req, res, next) => {
       questionnaires: rows.questionnaires.map((q) => ({ ...q, sections: q.definition?.sections || [] })),
       assessments: rows.assessments,
       findings: rows.vendor_findings,
-      monitoringJobs: rows.monitoring_jobs,
+      monitoringJobs: rows.monitoring_jobs.map((job) => ({
+        ...job,
+        status: job.status === 'ok' || job.status === 'healthy' ? 'healthy'
+          : job.status === 'error' || job.status === 'failed' ? 'failed'
+          : job.status === 'partial' ? 'overdue' : (job.status || 'idle')
+      })),
       users: rows.users.map((u) => ({ ...u, roles: roleMap.get(u.id) || [] })),
       auditLog: rows.audit_log,
       auditArchive: rows.audit_log_archive,
