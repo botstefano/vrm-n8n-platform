@@ -934,24 +934,37 @@ app.post('/api/cleanup', allowRoles('admin'), async (req, res, next) => {
     }).eq('status','open').lt('due_date', new Date(Date.now() - staleDays * 86400000).toISOString()).select('id');
     if (closeError) throw closeError;
     const cutoff = new Date(Date.now() - retentionYears * 365 * 86400000).toISOString();
-    const { data: oldAudit, error: auditError } = await supabase.from('audit_log').select('*').lt('created_at', cutoff);
-    if (auditError) throw auditError;
-    if (oldAudit?.length) {
+    // Process bounded batches. Supabase/PostgREST may cap returned rows; archiving
+    // only the selected IDs prevents deleting audit entries that were never copied.
+    let archivedAudit = 0;
+    while (true) {
+      const { data: oldAudit, error: auditError } = await supabase
+        .from('audit_log')
+        .select('id,created_at,actor,action,entity,entity_id,details')
+        .lt('created_at', cutoff)
+        .order('id', { ascending: true })
+        .limit(500);
+      if (auditError) throw auditError;
+      if (!oldAudit?.length) break;
+
       const archiveRows = oldAudit.map(({ id, created_at, actor, action, entity, entity_id, details }) =>
         ({ id, created_at, actor, action, entity, entity_id, details }));
       const { error: archiveError } = await supabase.from('audit_log_archive').upsert(archiveRows);
       if (archiveError) throw archiveError;
-      const { error: deleteError } = await supabase.from('audit_log').delete().lt('created_at', cutoff);
+
+      const archivedIds = oldAudit.map((entry) => entry.id);
+      const { error: deleteError } = await supabase.from('audit_log').delete().in('id', archivedIds);
       if (deleteError) throw deleteError;
+      archivedAudit += oldAudit.length;
     }
     const scoreRetentionYears = Math.max(1, Number(process.env.SCORE_RETENTION_YEARS || 2));
     const { data: oldScores, error: scoreError } = await supabase.from('score_history').delete()
       .lt('calculated_at', new Date(Date.now() - scoreRetentionYears * 365 * 86400000).toISOString()).select('id');
     if (scoreError) throw scoreError;
     await writeAudit(req, 'run_cleanup', 'system', 'wf-10', {
-      closed_findings: closed?.length || 0, archived_audit: oldAudit?.length || 0, purged_scores: oldScores?.length || 0
+      closed_findings: closed?.length || 0, archived_audit: archivedAudit, purged_scores: oldScores?.length || 0
     });
-    res.json({ closedFindings: closed?.length || 0, archivedAudit: oldAudit?.length || 0, purgedScores: oldScores?.length || 0 });
+    res.json({ closedFindings: closed?.length || 0, archivedAudit, purgedScores: oldScores?.length || 0 });
   } catch (error) { next(error); }
 });
 
