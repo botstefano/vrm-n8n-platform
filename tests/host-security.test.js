@@ -25,6 +25,16 @@ test('normalizes ordinary hostnames and rejects local or URL-injection forms', (
   assert.throws(() => normalizeScanHost('https://user:pass@example.com'));
 });
 
+test('accepts public IPv6 literals without triggering a DNS lookup', async () => {
+  assert.equal(normalizeScanHost('2606:4700:4700::1111'), '2606:4700:4700::1111');
+  const result = await resolvePublicHost('2606:4700:4700::1111', async () => {
+    throw new Error('literal IP should not trigger DNS');
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.family, 6);
+  assert.equal(result.ip, '2606:4700:4700::1111');
+});
+
 test('resolves a hostname and prefers a validated IPv4 address', async () => {
   const result = await resolvePublicHost('example.com', async () => [
     { address: '2606:4700:4700::1111', family: 6 },

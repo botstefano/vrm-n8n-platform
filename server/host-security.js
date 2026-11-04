@@ -28,6 +28,7 @@ export function isPublicIp(ip) {
 export function normalizeScanHost(value) {
   const raw = String(value || '').trim();
   if (!raw || raw.length > 253 || /[\s\u0000-\u001f]/.test(raw)) throw new Error('invalid_host');
+  if (net.isIP(raw)) return raw.toLowerCase();
   let parsed;
   try { parsed = new URL(raw.includes('://') ? raw : 'https://' + raw); }
   catch { throw new Error('invalid_host'); }
