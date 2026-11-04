@@ -635,8 +635,10 @@ app.get('/api/bootstrap', async (req, res, next) => {
         user_roles: 2000, audit_log: 1000, audit_log_archive: 1000,
         score_history: 5000, alert_notifications: 500, workflow_execution_logs: 100
       };
-      const { data, error } = await supabase.from(table).select('*')
-        .order(orderColumn, { ascending: false }).limit(rowLimits[table] || 1000);
+      let query = supabase.from(table).select('*').order(orderColumn, { ascending: false });
+      if (table === 'users') query = query.eq('id', req.user.profile_id);
+      if (table === 'user_roles') query = query.eq('user_id', req.user.profile_id);
+      const { data, error } = await query.limit(rowLimits[table] || 1000);
       if (error) throw error;
       return [table, data || []];
     }));
