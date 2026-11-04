@@ -113,6 +113,30 @@
       "maxTries": 3,
       "waitBetweenTries": 2000,
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vrm-manual/wf-05",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "manual-webhook",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        520
+      ],
+      "webhookId": "vrm-manual-wf-05",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "httpHeaderAlerts",
+          "name": "VRM Alerts Webhook Auth"
+        }
+      }
     }
   ],
   "connections": {
@@ -154,6 +178,17 @@
         [
           {
             "node": "Notify Backend (envío email)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Find Due Vendors",
             "type": "main",
             "index": 0
           }
