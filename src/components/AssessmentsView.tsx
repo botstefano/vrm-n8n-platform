@@ -33,7 +33,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
 }) => {
   const [selectedAssessmentForPortal, setSelectedAssessmentForPortal] = useState<Assessment | null>(null);
 
-  // Portal form answers simulator
+  // Internal assessment response form
   const [qAnswers, setQAnswers] = useState<Record<string, boolean>>({
     'q1-1': true,
     'q1-2': true,
@@ -146,7 +146,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
                 <th className="py-3 px-4 font-semibold">Iniciado</th>
                 <th className="py-3 px-4 font-semibold">Completado</th>
                 <th className="py-3 px-4 font-semibold">Puntaje</th>
-                <th className="py-3 px-4 font-semibold text-right">Portal Externo</th>
+                <th className="py-3 px-4 font-semibold text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
@@ -231,7 +231,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
         </div>
       </div>
 
-      {/* External Vendor Assessment Portal Simulator Modal */}
+      {/* Internal assessment response modal */}
       {selectedAssessmentForPortal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
           <div className="bg-slate-900 border border-cyan-700/80 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl overflow-y-auto max-h-[90vh]">
