@@ -37,8 +37,9 @@ app.get('/health', async (_req, res) => {
     const { error } = await supabase.from('roles').select('id', { head: true, count: 'exact' });
     database = error ? 'unavailable' : 'connected';
   }
-  res.status(200).json({
-    status: 'ok',
+  const healthy = database === 'connected';
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'ok' : 'degraded',
     database,
     uptime: process.uptime(),
     timestamp: new Date().toISOString()
@@ -341,8 +342,9 @@ app.post('/api/vendors', allowRoles('admin','risk_analyst'), async (req, res, ne
       primary_contact: body.primary_contact || {}
     }).select().single();
     if (error) throw error;
+    const scorecard = await recalculateVendorScore(data.id);
     await writeAudit(req, 'insert_vendor', 'vendors', data.id, { legal_name: data.legal_name });
-    res.status(201).json(data);
+    res.status(201).json({ ...data, current_score: scorecard.score, current_risk: scorecard.risk });
   } catch (error) { next(error); }
 });
 
