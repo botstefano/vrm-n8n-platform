@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -94,6 +95,19 @@ async function writeAudit(req, action, entity, entityId, details = {}) {
   if (error) console.error('No se pudo registrar auditoría:', error.message);
 }
 
+function verifyN8nSignature(req, res, next) {
+  const expected = process.env.N8N_WEBHOOK_SECRET || '';
+  const supplied = req.get('X-N8N-Signature') || '';
+  if (!expected) return res.status(503).json({ error: 'N8N_WEBHOOK_SECRET no está configurado en el backend.' });
+  const expectedBuffer = Buffer.from(expected);
+  const suppliedBuffer = Buffer.from(supplied);
+  if (!supplied || expectedBuffer.length !== suppliedBuffer.length ||
+      !crypto.timingSafeEqual(expectedBuffer, suppliedBuffer)) {
+    return res.status(401).json({ error: 'Firma de n8n inválida.' });
+  }
+  next();
+}
+
 async function recalculateVendorScore(vendorId) {
   const [{ data: vendor, error: vendorError }, { data: findings, error: findingsError }, { data: assessments, error: assessmentsError }] = await Promise.all([
     supabase.from('vendors').select('*').eq('id', vendorId).single(),
@@ -178,6 +192,50 @@ async function dispatchAlertRecord(payload, reqUser = null) {
   }
   return { ...data, status: data.delivery_status, timestamp: data.created_at, vendor_name: null, email_subject: null, email_html: null, slack_text: null };
 }
+
+// Webhooks privados para llamadas salientes desde n8n. Se validan con secreto compartido.
+app.post('/api/v1/scorecard/recalc/:vendorId', requireDatabase, verifyN8nSignature, async (req, res, next) => {
+  try {
+    res.json(await recalculateVendorScore(req.params.vendorId));
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/webhooks/n8n/findings-created', requireDatabase, verifyN8nSignature, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    if (body.vendor_id) await recalculateVendorScore(body.vendor_id);
+    await supabase.from('audit_log').insert({
+      actor: 'n8n', action: 'finding_ingested', entity: 'vendor_findings',
+      entity_id: String(body.finding_id || body.source_ref || ''),
+      details: { vendor_id: body.vendor_id, source: body.source, severity: body.severity, title: body.title }
+    });
+    res.json({ received: true, scorecardUpdated: Boolean(body.vendor_id) });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/webhooks/n8n/assessment-created', requireDatabase, verifyN8nSignature, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    await supabase.from('audit_log').insert({
+      actor: 'n8n', action: 'assessment_invitation_prepared', entity: 'assessments',
+      entity_id: String(body.assessment_id || ''),
+      details: { vendor_id: body.vendor_id, email_present: Boolean(body.email), link_present: Boolean(body.link) }
+    });
+    res.json({ received: true, message: 'Invitación registrada; la entrega del correo depende del workflow/SMTP configurado.' });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/webhooks/n8n/workflow-failed', requireDatabase, verifyN8nSignature, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    await supabase.from('audit_log').insert({
+      actor: 'n8n', action: 'workflow_failed', entity: 'n8n_workflow',
+      entity_id: String(body.workflow || body.workflow_id || ''),
+      details: { node: body.node, message: body.message, execution_id: body.execution_id }
+    });
+    res.json({ received: true });
+  } catch (error) { next(error); }
+});
 
 app.use('/api', requireDatabase, authenticate);
 
@@ -480,15 +538,26 @@ app.post('/api/cleanup', allowRoles('admin'), async (req, res, next) => {
 });
 
 app.post('/api/workflows/:workflowCode/execute', allowRoles('admin','risk_analyst'), async (req, res) => {
-  if (!process.env.N8N_MANUAL_WEBHOOK_BASE_URL) {
-    return res.status(503).json({ error: 'La ejecución manual de n8n aún no está configurada. Los workflows programados deben ejecutarse desde n8n.' });
+  const code = String(req.params.workflowCode).toLowerCase();
+  if (!/^wf-(0[0-9]|10)$/.test(code)) return res.status(400).json({ error: 'Código de workflow no válido.' });
+  if (!process.env.N8N_MANUAL_WEBHOOK_BASE_URL || !process.env.ALERTS_WEBHOOK_TOKEN) {
+    return res.status(503).json({ error: 'Configura N8N_MANUAL_WEBHOOK_BASE_URL y ALERTS_WEBHOOK_TOKEN en Render, e importa los workflows actualizados en n8n.' });
   }
   try {
-    const code = String(req.params.workflowCode).replace(/[^a-z0-9-]/gi, '');
     const url = process.env.N8N_MANUAL_WEBHOOK_BASE_URL.replace(/\/$/, '') + '/' + encodeURIComponent(code);
-    const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requested_by: req.user.email }) });
-    if (!response.ok) return res.status(502).json({ error: `n8n respondió con HTTP ${response.status}.` });
-    res.json({ status: 'accepted', workflowCode: code, result: await response.text() });
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'X-Alert-Token': process.env.ALERTS_WEBHOOK_TOKEN },
+      body: JSON.stringify({ requested_by: req.user.email, workflow_code: code })
+    });
+    const responseText = await response.text();
+    if (!response.ok) return res.status(502).json({ error: `n8n respondió con HTTP ${response.status}: ${responseText.slice(0, 300)}` });
+    await supabase.from('workflow_execution_logs').insert({
+      workflow_code: code, workflow_name: code.toUpperCase(), status: 'running',
+      summary: 'Webhook manual aceptado por n8n.',
+      details: { requested_by: req.user.email, response: responseText.slice(0, 500) }
+    });
+    res.json({ status: 'accepted', workflowCode: code, message: 'Webhook aceptado por n8n.' });
   } catch (error) { res.status(502).json({ error: error.message || 'No se pudo contactar con n8n.' }); }
 });
 
