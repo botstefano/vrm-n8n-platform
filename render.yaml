@@ -49,5 +49,7 @@ services:
         sync: false
       - key: N8N_WEBHOOK_SECRET
         sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
       - key: N8N_MANUAL_WEBHOOK_BASE_URL
         sync: false
