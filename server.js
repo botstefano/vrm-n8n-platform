@@ -68,7 +68,7 @@ async function authenticate(req, res, next) {
     if (profileError) throw profileError;
     if (!profile && data.user.email) {
       const fallback = await supabase.from('users')
-        .select('id,email,full_name,is_active').ilike('email', data.user.email).maybeSingle();
+        .select('id,email,full_name,is_active').eq('email', data.user.email.toLowerCase()).maybeSingle();
       if (fallback.error) throw fallback.error;
       profile = fallback.data;
     }
@@ -372,9 +372,11 @@ app.post('/api/public/assessments/:token/complete', requireDatabase, async (req,
     if (error) throw error;
     if (!saved) return res.status(409).json({ error: 'La evaluación ya fue enviada o el enlace fue utilizado.' });
 
-    await supabase.from('vendors').update({
+    const { error: vendorStatusError } = await supabase.from('vendors').update({
       status: score >= 75 ? 'approved' : 'conditional'
     }).eq('id', vendor.id).eq('status', 'reevaluation');
+    const vendorStatusUpdated = !vendorStatusError;
+    if (vendorStatusError) console.error('Assessment saved, but vendor status update failed:', vendorStatusError.message);
     const { error: auditError } = await supabase.from('audit_log').insert({
       actor: 'vendor_portal',
       action: 'vendor_assessment_submitted',
@@ -389,7 +391,7 @@ app.post('/api/public/assessments/:token/complete', requireDatabase, async (req,
       scorecardUpdated = false;
       console.error('Assessment scorecard refresh failed:', scoreError.message);
     }
-    res.json({ completed: true, score, scorecardUpdated, message: 'La evaluación fue registrada correctamente.' });
+    res.json({ completed: true, score, vendorStatusUpdated, scorecardUpdated, message: 'La evaluación fue registrada correctamente.' });
   } catch (error) { next(error); }
 });
 
@@ -713,10 +715,16 @@ app.post('/api/assessments/:id/complete', allowRoles('admin','risk_analyst'), as
     if (error) throw error;
     if (!data) return res.status(409).json({ error: 'La evaluación ya fue completada o no admite más respuestas.' });
     const nextVendorStatus = score >= 75 ? 'approved' : 'conditional';
-    await supabase.from('vendors').update({ status: nextVendorStatus }).eq('id', data.vendor_id).eq('status', 'reevaluation');
-    await writeAudit(req, 'complete_assessment', 'assessments', data.id, { score });
-    await recalculateVendorScore(data.vendor_id);
-    res.json(data);
+    const { error: vendorStatusError } = await supabase.from('vendors').update({ status: nextVendorStatus })
+      .eq('id', data.vendor_id).eq('status', 'reevaluation');
+    await writeAudit(req, 'complete_assessment', 'assessments', data.id, { score, vendor_status_updated: !vendorStatusError });
+    let scorecardUpdated = true;
+    try { await recalculateVendorScore(data.vendor_id); }
+    catch (scoreError) {
+      scorecardUpdated = false;
+      console.error('Assessment scorecard refresh failed:', scoreError.message);
+    }
+    res.json({ ...data, vendorStatusUpdated: !vendorStatusError, scorecardUpdated });
   } catch (error) { next(error); }
 });
 
