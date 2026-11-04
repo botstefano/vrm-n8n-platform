@@ -45,7 +45,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const out = [];\nfor (const it of $input.all()) {\n  try {\n    const u = new URL(/^https?:\\/\\//i.test(it.json.website) ? it.json.website : 'https://' + it.json.website);\n    out.push({ json: { vendor_id: it.json.id, host: u.hostname.toLowerCase() } });\n  } catch (e) { /* ignorar URL inválida */ }\n}\nif (!out.length) {\n  return [{ json: {\n    kind: 'summary',\n    job_type: 'shodan',\n    interval_min: 1440,\n    status: 'ok',\n    last_run: new Date().toISOString(),\n    meta: { scanned: 0, failed: 0, no_data: 0, blocked: 0, findings: 0, invalid_websites: items.length }\n  } }];\n}\nreturn out;"
+        "jsCode": "const items = $input.all().filter(it => it.json && it.json.id && it.json.website);\nconst out = [];\nfor (const it of items) {\n  try {\n    const u = new URL(/^https?:\\/\\//i.test(it.json.website) ? it.json.website : 'https://' + it.json.website);\n    out.push({ json: { vendor_id: it.json.id, host: u.hostname.toLowerCase() } });\n  } catch (e) { /* ignorar URL inválida */ }\n}\nif (!out.length) {\n  return [{ json: {\n    kind: 'summary',\n    job_type: 'shodan',\n    interval_min: 1440,\n    status: 'ok',\n    last_run: new Date().toISOString(),\n    meta: { scanned: 0, failed: 0, no_data: 0, blocked: 0, findings: 0, invalid_websites: items.length }\n  } }];\n}\nreturn out;"
       },
       "id": "extract",
       "name": "Extract Host",
