@@ -158,6 +158,30 @@
         1420,
         500
       ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vrm-manual/wf-08",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "manual-webhook",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        520
+      ],
+      "webhookId": "vrm-manual-wf-08",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "httpHeaderAlerts",
+          "name": "VRM Alerts Webhook Auth"
+        }
+      }
     }
   ],
   "connections": {
@@ -217,6 +241,17 @@
         [
           {
             "node": "Healthy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Backend Health",
             "type": "main",
             "index": 0
           }
