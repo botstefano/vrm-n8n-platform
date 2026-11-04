@@ -477,7 +477,9 @@ app.post('/api/v1/webhooks/n8n/workflow-completed', requireDatabase, verifyN8nSi
       .maybeSingle();
     if (currentError) throw currentError;
     if (!current) return res.status(404).json({ error: 'No existe una ejecución manual con ese request_id.' });
-    if (current.completed_at) return res.json({ received: true, alreadyCompleted: true });
+    if (current.completed_at && !(current.status === 'partial' && status === 'success')) {
+      return res.json({ received: true, alreadyCompleted: true, status: current.status });
+    }
 
     const details = {
       ...(current.details || {}),
