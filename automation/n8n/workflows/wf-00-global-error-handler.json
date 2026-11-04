@@ -113,13 +113,7 @@
             "node": "Send Alert",
             "type": "main",
             "index": 0
-          }
-        ]
-      ]
-    },
-    "Send Alert": {
-      "main": [
-        [
+          },
           {
             "node": "Report Backend",
             "type": "main",
