@@ -92,7 +92,6 @@ export const WORKFLOWS_REGISTRY: WorkflowSummary[] = [
     name: 'Health Check & Deadman Monitor',
     trigger: 'Cron (Every 30m)',
     scheduleDescription: 'Every 30 minutes (n8n interval)',
-    jobType: 'health_check',
     description: 'Inspects monitoring_jobs table for stalled or overdue automation runs. Pings VRM backend /health endpoint and dispatches critical alert if services degrade.',
     targetSources: ['health'],
     status: 'active'
@@ -103,7 +102,6 @@ export const WORKFLOWS_REGISTRY: WorkflowSummary[] = [
     name: 'Weekly VRM Digest Generator',
     trigger: 'Cron (Mondays 08:00)',
     scheduleDescription: 'Every Monday at 08:00 America/Lima (0 8 * * 1)',
-    jobType: 'weekly_digest',
     description: 'Compiles an executive summary of vendor risk distribution, open and overdue findings, recent findings, closures, and the ten highest-risk vendors; emails active VRM roles in BCC.',
     targetSources: ['digest'],
     status: 'active'
