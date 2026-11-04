@@ -3,12 +3,13 @@ import { ShieldAlert, LockKeyhole, Mail, Loader2, AlertCircle } from 'lucide-rea
 
 interface LoginViewProps {
   configured: boolean;
+  apiConfigured: boolean;
   loading: boolean;
   error: string | null;
   onSubmit: (email: string, password: string) => void;
 }
 
-export const LoginView: React.FC<LoginViewProps> = ({ configured, loading, error, onSubmit }) => {
+export const LoginView: React.FC<LoginViewProps> = ({ configured, apiConfigured, loading, error, onSubmit }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -33,6 +34,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ configured, loading, error
             <h2 className="text-base font-semibold text-white">Iniciar sesión</h2>
             <p className="text-xs text-slate-400 mt-1">Accede con tu cuenta de Supabase Auth.</p>
           </div>
+
+          {!apiConfigured && (
+            <div className="rounded-lg border border-amber-700/60 bg-amber-950/30 p-3 text-xs text-amber-200">
+              Falta VITE_API_BASE_URL con la URL del servicio API de Render. El inicio de sesión no cargará datos hasta configurar esa dirección.
+            </div>
+          )}
 
           {!configured && (
             <div className="rounded-lg border border-amber-700/60 bg-amber-950/30 p-3 text-xs text-amber-200">
