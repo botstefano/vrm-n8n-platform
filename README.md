@@ -19,7 +19,7 @@ La API utiliza la Secret key de Supabase exclusivamente en servidor. El navegado
 2. **Proveedores y tecnologías:** inventario de terceros, criticidad, contacto de seguridad y CPE 2.3.
 3. **Hallazgos:** gestión de CVEs, CT Logs, expiración TLS, superficie de ataque y hallazgos manuales.
 4. **Evaluaciones:** cuestionarios, enlaces HMAC de un solo uso para proveedores, respuestas y puntuaciones persistidas.
-5. **Alertas:** registro de notificaciones y estado de entrega (pending, sent, deduped, failed).
+5. **Alertas:** registro de notificaciones y estado de entrega (pending, sent, deduped, failed), incluidas las alertas generadas por los escáneres n8n.
 6. **Automatización:** catálogo WF-00 a WF-10 y disparadores manuales mediante webhooks.
 7. **Salud:** comprobación de conectividad con la API y Supabase, además de seguimiento de jobs.
 8. **Auditoría:** historial, archivado y limpieza de registros.
