@@ -68,9 +68,16 @@ class VrmStore {
   }
 
   public async hydrateWorkflowLogs(): Promise<void> {
+    const previousStatuses = new Map(this.workflowLogs.map((log) => [log.id, log.status]));
     const response = await apiRequest<{ workflowLogs: WorkflowRunLog[] }>('/api/workflows/logs');
-    this.workflowLogs = response.workflowLogs || [];
+    const nextLogs = response.workflowLogs || [];
+    const completedRun = nextLogs.some((log) =>
+      previousStatuses.get(log.id) === 'running' && log.status !== 'running'
+    );
+    this.workflowLogs = nextLogs;
     this.notify();
+    // A completed scanner can change findings, alerts, vendor scores and audit data.
+    if (completedRun) await this.hydrateFromApi();
   }
 
   public async hydrateFromApi(): Promise<void> {
@@ -407,7 +414,7 @@ class VrmStore {
       throw error;
     }
     try {
-      await this.hydrateWorkflowLogs();
+      await this.hydrateFromApi();
       const saved = this.workflowLogs.find((log) => log.id === response.requestId);
       if (saved) return saved;
     } catch (error) {
