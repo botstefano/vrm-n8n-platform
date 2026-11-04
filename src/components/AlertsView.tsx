@@ -60,7 +60,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
             Centro de Despacho de Alertas Multicanal (WF-06)
           </h2>
           <p className="text-xs text-slate-400">
-            Deduplicación en Redis (ventana de 1h), enrutamiento por severidad hacia Slack (#secops) y SMTP a usuarios RBAC
+            Alertas persistidas en Supabase; el envío depende de la configuración activa de n8n, Slack y SMTP
           </p>
         </div>
       </div>
@@ -173,9 +173,11 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
                           <SeverityBadge severity={al.severity} />
                           <span
                             className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-bold uppercase ${
-                              al.status === 'deduped'
+                              al.status === 'sent'
+                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                : al.status === 'deduped'
                                 ? 'bg-amber-950 text-amber-400 border border-amber-800'
-                                : 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                : 'bg-rose-950 text-rose-300 border border-rose-800'
                             }`}
                           >
                             {al.status}
@@ -211,7 +213,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
                     <div className="w-5 h-5 rounded bg-[#4A154B] flex items-center justify-center font-bold text-[10px] text-white">
                       #
                     </div>
-                    <span className="text-xs font-bold text-white">Canal de Slack: #secops-alerts</span>
+                    <span className="text-xs font-bold text-white">Previsualización del mensaje Slack</span>
                   </div>
                   <span className="text-[11px] font-mono text-slate-400">Incoming Webhook</span>
                 </div>
@@ -263,7 +265,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
                 <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                   <div className="flex items-center gap-2">
                     <Mail className="w-4 h-4 text-cyan-400" />
-                    <span className="text-xs font-bold text-white">Plantilla de Correo SMTP (HTML)</span>
+                    <span className="text-xs font-bold text-white">Previsualización de correo electrónico</span>
                   </div>
                   <span className="text-[11px] text-slate-400">
                     Destinatarios: RBAC (Admin, Analista, Auditor)
@@ -286,7 +288,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
             </div>
           ) : (
             <div className="p-12 text-center rounded-xl bg-slate-900/40 border border-slate-800 text-slate-500 text-xs">
-              Seleccione una alerta del historial para visualizar la previsualización en tiempo real de Slack y Correo Electrónico.
+              Seleccione una alerta para revisar el contenido preparado para los canales de notificación.
             </div>
           )}
         </div>
