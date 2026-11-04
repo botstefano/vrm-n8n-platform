@@ -150,6 +150,50 @@
           "name": "VRM Alerts Webhook Auth"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst summary = $('Summary').first().json || {};\nconst meta = summary.meta || {};\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-10',\n  status: summary.status === 'error' ? 'failed' : summary.status === 'partial' ? 'partial' : 'success',\n  summary: 'Limpieza completada: ' + Number(meta.closed_findings || 0) + ' hallazgo(s) cerrado(s), ' +\n    Number(meta.archived_audit || 0) + ' evento(s) archivado(s) y ' + Number(meta.purged_scores || 0) + ' score(s) purgado(s).',\n  details: meta\n} }];"
+      },
+      "id": "manual-completion-code-wf-10",
+      "name": "Build Manual Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-Signature",
+              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "manual-completion-http-wf-10",
+      "name": "Report Manual Completion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2380,
+        520
+      ],
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -213,6 +257,28 @@
         [
           {
             "node": "Auto-close Stale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Run": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
             "type": "main",
             "index": 0
           }
