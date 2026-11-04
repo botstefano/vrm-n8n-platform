@@ -30,7 +30,7 @@ export interface WorkflowRunLog {
   workflowName: string;
   startedAt: string;
   completedAt?: string;
-  status: 'running' | 'success' | 'failed';
+  status: 'running' | 'success' | 'failed' | 'partial';
   steps: {
     nodeId: string;
     nodeName: string;
@@ -65,6 +65,12 @@ class VrmStore {
     this.vendors = []; this.technologies = []; this.questionnaires = []; this.assessments = [];
     this.findings = []; this.monitoringJobs = []; this.users = []; this.auditLog = [];
     this.auditArchive = []; this.scoreHistory = []; this.alerts = []; this.workflowLogs = [];
+  }
+
+  public async hydrateWorkflowLogs(): Promise<void> {
+    const response = await apiRequest<{ workflowLogs: WorkflowRunLog[] }>('/api/workflows/logs');
+    this.workflowLogs = response.workflowLogs || [];
+    this.notify();
   }
 
   public async hydrateFromApi(): Promise<void> {
@@ -374,15 +380,26 @@ class VrmStore {
   // Manual runs are delegated to n8n; no simulated successful workflow runs.
   public async executeWorkflow(workflowId: string): Promise<WorkflowRunLog> {
     const startedAt = new Date().toISOString();
-    const response = await apiRequest<{ status: string; workflowCode: string }>(
+    const response = await apiRequest<{ status: string; workflowCode: string; requestId: string }>(
       `/api/workflows/${encodeURIComponent(workflowId)}/execute`,
       { method: 'POST', body: {} }
     );
+    try {
+      await this.hydrateWorkflowLogs();
+      const saved = this.workflowLogs.find((log) => log.id === response.requestId);
+      if (saved) return saved;
+    } catch (error) {
+      console.error('No se pudo actualizar el historial de workflows:', error);
+    }
     const entry: WorkflowRunLog = {
-      id: createId(), workflowId, workflowName: workflowId.toUpperCase(),
-      startedAt, status: 'running', steps: [],
+      id: response.requestId || createId(),
+      workflowId,
+      workflowName: workflowId.toUpperCase(),
+      startedAt,
+      status: 'running',
+      steps: [],
       summary: response.status === 'accepted'
-        ? 'n8n aceptó la solicitud. El resultado final se registrará cuando el workflow termine.'
+        ? 'n8n aceptó la solicitud. Esperando el resultado final.'
         : 'Solicitud recibida por el servicio de automatización.'
     };
     this.workflowLogs.unshift(entry);
