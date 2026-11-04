@@ -426,22 +426,16 @@ class VrmStore {
     return result;
   }
 
-  public completeAssessment(assessmentId: string, calculatedScore: number = 88, responses: Record<string, boolean> = {}): void {
-    const asm = this.assessments.find((a) => a.id === assessmentId);
-    if (!asm) return;
-    asm.status = 'completed';
-    asm.completed_at = new Date().toISOString();
-    asm.score = calculatedScore;
-
-    const vendor = this.vendors.find((v) => v.id === asm.vendor_id);
-    if (vendor && vendor.status === 'reevaluation') {
-      vendor.status = calculatedScore >= 75 ? 'approved' : 'conditional';
-      this.recalculateScorecard(vendor.id);
-    }
-    this.logAudit('portal:vendor', 'complete_assessment', 'assessments', assessmentId, {
-      score: calculatedScore
+  public async completeAssessment(
+    assessmentId: string,
+    calculatedScore: number = 88,
+    responses: Record<string, boolean> = {}
+  ): Promise<void> {
+    await apiRequest(`/api/assessments/${assessmentId}/complete`, {
+      method: 'POST',
+      body: { score: calculatedScore, responses }
     });
-    this.notify();
+    await this.hydrateFromApi();
   }
 
   // Multi-Channel Alert Dispatcher (WF-06 logic)
