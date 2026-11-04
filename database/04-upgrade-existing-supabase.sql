@@ -83,6 +83,26 @@ drop trigger if exists trg_findings_updated_at on public.vendor_findings;
 create trigger trg_findings_updated_at before update on public.vendor_findings
 for each row execute procedure public.set_updated_at();
 
+-- Normalizar correos de perfiles heredados sin romper user_roles.
+-- Si existen dos perfiles con la misma dirección solo diferenciada por mayúsculas,
+-- abortar para que un administrador los concilie explícitamente.
+do $
+begin
+  if exists (
+    select lower(email)
+    from public.users
+    group by lower(email)
+    having count(*) > 1
+  ) then
+    raise exception 'Hay perfiles duplicados por correo ignorando mayúsculas. Concilia public.users/user_roles antes de continuar.';
+  end if;
+end;
+$;
+
+update public.users
+set email = lower(email)
+where email <> lower(email);
+
 -- Sincronización Auth -> public.users compatible con los UUID históricos.
 -- Si ya existe un perfil con ese email, se conserva su ID para no romper user_roles;
 -- la API lo enlaza con el usuario Auth por su email verificado.
