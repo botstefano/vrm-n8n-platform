@@ -52,9 +52,13 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
     return active && isDue && !hasPending;
   });
 
-  const handleTriggerReevaluations = () => {
-    const res = store.triggerReevaluationForDue();
-    alert(`WF-05 ejecutado: Se generaron ${res.assessmentsCreated} evaluaciones con tokens firmados HMAC-SHA256.`);
+  const handleTriggerReevaluations = async () => {
+    try {
+      const result = await store.triggerReevaluationForDue();
+      alert(`Se crearon ${result.assessmentsCreated} evaluaciones en Supabase.`);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'No se pudieron crear las evaluaciones.');
+    }
   };
 
   const handleCopyLink = (token?: string) => {
@@ -76,8 +80,8 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
     const q5 = qAnswers['q2-3'] ? 15 : 0;
     totalScore = q1 + q2 + q3 + q4 + q5;
 
-    store.completeAssessment(selectedAssessmentForPortal.id, totalScore);
-    alert(`Evaluación completada con éxito. Calificación del cuestionario: ${totalScore}/100. Proveedor actualizado.`);
+    store.completeAssessment(selectedAssessmentForPortal.id, totalScore, qAnswers);
+    alert(`Respuestas enviadas para guardar en Supabase. Calificación: ${totalScore}/100.`);
     setSelectedAssessmentForPortal(null);
   };
 
@@ -91,7 +95,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
             Evaluaciones de Seguridad & Portal de Proveedores (WF-05)
           </h2>
           <p className="text-xs text-slate-400">
-            Cadencia automatizada de reevaluación (90/180/365 días) con enlaces firmados HMAC-SHA256
+            Reevaluaciones persistidas en Supabase según criticidad del proveedor
           </p>
         </div>
 
@@ -134,7 +138,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
             Registro Histórico de Evaluaciones ({assessments.length})
           </h3>
-          <span className="text-xs text-slate-400">Firmado con PORTAL_TOKEN_SECRET</span>
+          <span className="text-xs text-slate-400">Persistencia centralizada en Supabase</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -214,26 +218,12 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
 
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {asm.portal_token && (
-                            <button
-                              onClick={() => handleCopyLink(asm.portal_token)}
-                              className="p-1 text-slate-400 hover:text-cyan-300 hover:bg-slate-800 rounded"
-                              title="Copiar Link HMAC"
-                            >
-                              {copiedToken === asm.portal_token ? (
-                                <Check className="w-3.5 h-3.5 text-emerald-400" />
-                              ) : (
-                                <Copy className="w-3.5 h-3.5" />
-                              )}
-                            </button>
-                          )}
-
                           <button
                             onClick={() => setSelectedAssessmentForPortal(asm)}
                             className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800"
                           >
                             <ExternalLink className="w-3 h-3" />
-                            <span>Abrir Portal</span>
+                            <span>Abrir evaluación</span>
                           </button>
                         </div>
                       </td>
@@ -254,15 +244,15 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded text-[10px] uppercase font-mono font-bold bg-cyan-950 text-cyan-400 border border-cyan-800">
-                    Vendor Portal (HMAC Verified)
+                    Evaluación interna
                   </span>
                   <h3 className="text-base font-bold text-white">Cuestionario de Cumplimiento de Seguridad</h3>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">
-                  Simulación de la vista pública accesible mediante el token firmado:
+                  Formulario de respuesta para guardar la evaluación en la base de datos:
                 </p>
                 <div className="font-mono text-[10px] text-cyan-300/80 bg-slate-950 p-1.5 rounded mt-1 truncate">
-                  {selectedAssessmentForPortal.portal_token || 'Token no generado'}
+                  {selectedAssessmentForPortal.id}
                 </div>
               </div>
 
@@ -343,7 +333,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
 
             <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
               <span className="text-xs text-slate-400">
-                Al enviar, el backend verificará la firma HMAC y actualizará el scorecard.
+                Al enviar, las respuestas y la puntuación se guardarán en Supabase.
               </span>
               <div className="flex items-center gap-2">
                 <button
