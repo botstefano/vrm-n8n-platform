@@ -488,7 +488,11 @@ app.get('/api/bootstrap', async (req, res, next) => {
       vendors: rows.vendors.map((vendor) => ({ ...vendor, website: vendor.website || '', current_score: Number(vendor.current_score ?? 100), primary_contact: vendor.primary_contact || {} })),
       technologies: rows.vendor_technologies,
       questionnaires: rows.questionnaires.map((q) => ({ ...q, sections: q.definition?.sections || [] })),
-      assessments: rows.assessments.map((assessment) => ({ ...assessment, score: assessment.score === null ? null : Number(assessment.score) })),
+      assessments: rows.assessments.map(({ portal_token_hash, ...assessment }) => ({
+        ...assessment,
+        score: assessment.score === null ? null : Number(assessment.score),
+        portal_link: buildPortalLink({ ...assessment, portal_token_hash })
+      })),
       findings: rows.vendor_findings.map((finding) => ({ ...finding, description: finding.description || '', evidence: finding.evidence || {} })),
       monitoringJobs: rows.monitoring_jobs.map((job) => ({
         ...job,
