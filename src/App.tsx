@@ -180,7 +180,7 @@ export function App() {
     );
   }
 
-  if (!isSupabaseConfigured || !session) {
+  if (!isSupabaseConfigured || !isApiConfigured() || !session) {
     return (
       <LoginView
         configured={isSupabaseConfigured}
