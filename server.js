@@ -523,7 +523,10 @@ app.get('/api/bootstrap', async (req, res, next) => {
       assessments: rows.assessments.map(({ portal_token_hash, ...assessment }) => ({
         ...assessment,
         score: assessment.score === null ? null : Number(assessment.score),
-        portal_link: buildPortalLink({ ...assessment, portal_token_hash })
+        // The signed URL is a bearer credential. Never disclose it to read-only auditors.
+        portal_link: req.user.roles.some((role) => ['admin', 'risk_analyst'].includes(role))
+          ? buildPortalLink({ ...assessment, portal_token_hash })
+          : null
       })),
       findings: rows.vendor_findings.map((finding) => ({ ...finding, description: finding.description || '', evidence: finding.evidence || {} })),
       monitoringJobs: rows.monitoring_jobs.map((job) => ({
