@@ -69,7 +69,6 @@ export interface Assessment {
   started_at: string | null;
   completed_at: string | null;
   score?: number | null;
-  portal_token?: string;
   portal_link?: string | null;
 }
 
