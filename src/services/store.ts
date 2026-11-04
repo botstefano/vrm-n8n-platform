@@ -29,6 +29,13 @@ import { apiRequest } from './api';
 
 function createId(): string { return crypto.randomUUID(); }
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[character] as string));
+}
+
+
 export interface WorkflowRunLog {
   id: string;
   workflowId: string;
@@ -475,11 +482,11 @@ class VrmStore {
     const email_html = `
       <div style="font-family: sans-serif; max-width: 600px; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
         <h2 style="color: ${s === 'critical' ? '#dc2626' : s === 'high' ? '#ea580c' : '#2563eb'};">Alerta de Seguridad VRM</h2>
-        <p><strong>Severidad:</strong> <span style="text-transform: uppercase;">${s}</span></p>
-        <p><strong>Título:</strong> ${params.title}</p>
-        ${vendor ? `<p><strong>Proveedor:</strong> ${vendor.legal_name}</p>` : ''}
-        <p><strong>Fuente:</strong> ${params.source || 'n/a'} (${params.source_ref || ''})</p>
-        ${params.description ? `<p style="background: #f8fafc; padding: 12px; border-left: 4px solid #94a3b8;">${params.description}</p>` : ''}
+        <p><strong>Severidad:</strong> <span style="text-transform: uppercase;">${escapeHtml(s)}</span></p>
+        <p><strong>Título:</strong> ${escapeHtml(params.title)}</p>
+        ${vendor ? `<p><strong>Proveedor:</strong> ${escapeHtml(vendor.legal_name)}</p>` : ''}
+        <p><strong>Fuente:</strong> ${escapeHtml(params.source || 'n/a')} (${escapeHtml(params.source_ref || '')})</p>
+        ${params.description ? `<p style="background: #f8fafc; padding: 12px; border-left: 4px solid #94a3b8;">${escapeHtml(params.description)}</p>` : ''}
         <p style="color: #64748b; font-size: 12px;">Enviado automáticamente por el motor de automatización n8n VRM.</p>
       </div>
     `;
