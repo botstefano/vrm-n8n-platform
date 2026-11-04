@@ -60,21 +60,22 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
       case 'wf-00':
         return [
           { name: 'Error Trigger', type: 'Trigger', desc: 'Captura fallos de cualquier workflow' },
-          { name: 'Dead-Letter Log', type: 'Postgres', desc: 'Registra traza de diagnóstico' },
-          { name: 'WF-06 Alert Webhook', type: 'HTTP Webhook', desc: 'Reenvía incidente a Slack/Email' }
+          { name: 'Build Payload', type: 'Code JS', desc: 'Extrae workflow, ejecución, nodo y mensaje de error' },
+          { name: 'WF-06 Alert Webhook', type: 'HTTP Webhook', desc: 'Reenvía el incidente a Slack/Email' },
+          { name: 'Report Backend', type: 'HTTP', desc: 'Registra el evento en la auditoría de la API' }
         ];
       case 'wf-01':
         return [
           { name: 'Cron 6h', type: 'Schedule', desc: '0 */6 * * *' },
           { name: 'Get Window', type: 'Postgres', desc: 'Ventana desde última ejecución' },
           { name: 'Get Technologies', type: 'Postgres', desc: 'CPEs activos (cpe:2.3:a:...)' },
-          { name: 'Query NVD 2.0 API', type: 'HTTP Request', desc: 'Filtra CVSS >= NVD_MIN_CVSS' },
-          { name: 'Insert Findings', type: 'Postgres', desc: 'ON CONFLICT DO NOTHING (idempotente)' },
+          { name: 'Query NVD 2.0 API', type: 'HTTP Request', desc: 'Paginación por startIndex, 2.000 CVE por página' },
+          { name: 'Upsert Findings', type: 'Postgres', desc: 'Deduplica por proveedor/CVE y actualiza si escala la severidad' },
           { name: 'Notify Severe', type: 'Condition / Alert', desc: 'Dispara WF-06 si CVSS >= 7' }
         ];
       case 'wf-02':
         return [
-          { name: 'Cron 24h', type: 'Schedule', desc: 'Diario 00:00 UTC' },
+          { name: 'Cron 24h', type: 'Schedule', desc: 'Cada 24 horas desde la activación' },
           { name: 'Get Domains', type: 'Postgres', desc: 'Dominios de proveedores' },
           { name: 'Query crt.sh API', type: 'HTTP Request', desc: 'Certificate Transparency logs' },
           { name: 'Filter Subdomains', type: 'Code JS', desc: 'Clasifica dev|staging|admin|vpn' },
@@ -83,16 +84,16 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         ];
       case 'wf-03':
         return [
-          { name: 'Cron 24h', type: 'Schedule', desc: 'Diario 01:00 UTC' },
-          { name: 'Get Active Endpoints', type: 'Postgres', desc: 'Hosts HTTPS activos' },
-          { name: 'Native TLS Handshake', type: 'Code (tls)', desc: 'Sin shell; evalúa x509 cert chain' },
+          { name: 'Cron 24h', type: 'Schedule', desc: 'Cada 24 horas desde la activación' },
+          { name: 'Get Active Endpoints', type: 'Postgres', desc: 'Hosts HTTPS de proveedores activos' },
+          { name: 'TLS Certificate Probe', type: 'Code (tls)', desc: 'Inspecciona certificado X.509 y fecha de expiración; no evalúa cifrados débiles' },
           { name: 'Check Thresholds', type: 'IF Node', desc: '<60 días, <30 días, <7 días, vencido' },
           { name: 'Upsert Finding', type: 'Postgres', desc: 'Alerta solo si escala de severidad' }
         ];
       case 'wf-04':
         return [
-          { name: 'Cron 24h', type: 'Schedule', desc: 'Diario 02:00 UTC' },
-          { name: 'Resolve Hostnames', type: 'Code (dns)', desc: 'Resuelve IPs públicas' },
+          { name: 'Cron 24h', type: 'Schedule', desc: 'Cada 24 horas desde la activación' },
+          { name: 'Resolve Hostnames', type: 'Code (dns)', desc: 'Resuelve IP pública y bloquea direcciones privadas o reservadas' },
           { name: 'Query Shodan Host API', type: 'HTTP Request', desc: 'Consulta puertos y banners' },
           { name: 'Flag Dangerous Ports', type: 'Code JS', desc: 'RDP 3389, SMB 445, Redis 6379...' },
           { name: 'Insert Shodan Finding', type: 'Postgres', desc: 'Guarda banner y CVEs' }
@@ -117,8 +118,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         return [
           { name: 'Cron 1h', type: 'Schedule', desc: 'Cada hora en punto' },
           { name: 'Get Active Vendors', type: 'Postgres', desc: 'Proveedores en monitoreo' },
-          { name: 'Call Recalc API', type: 'HTTP Request', desc: 'POST /api/v1/scorecard/recalc/{id}' },
-          { name: 'Update Score History', type: 'Postgres', desc: 'Registra snapshot temporal' }
+          { name: 'Call Recalc API', type: 'HTTP Request', desc: 'POST /api/v1/scorecard/recalc/{id}; el backend registra score_history' }
         ];
       case 'wf-08':
         return [
@@ -129,8 +129,8 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         ];
       case 'wf-09':
         return [
-          { name: 'Cron Weekly', type: 'Schedule', desc: 'Lunes 08:00 UTC' },
-          { name: 'Query Open Findings', type: 'Postgres', desc: 'Consolida métricas semanales' },
+          { name: 'Cron Weekly', type: 'Schedule', desc: 'Lunes 08:00 America/Lima' },
+          { name: 'Query Risk & Findings', type: 'Postgres', desc: 'Riesgo, hallazgos abiertos/vencidos, nuevos/cerrados y top 10 proveedores' },
           { name: 'Render HTML Digest', type: 'Code JS', desc: 'Plantilla ejecutiva formateada' },
           { name: 'Send BCC Email', type: 'SMTP Node', desc: 'Envío único a partes interesadas' }
         ];
@@ -138,8 +138,9 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         return [
           { name: 'Cron Daily 03:00', type: 'Schedule', desc: 'Mantenimiento nocturno' },
           { name: 'Close Stale Findings', type: 'Postgres', desc: "auto_closed_stale (>STALE_FINDING_DAYS)" },
-          { name: 'Archive Audit Logs', type: 'Postgres', desc: 'Mueve a audit_log_archive (>1y)' },
-          { name: 'Purge Old Scores', type: 'Postgres', desc: 'Depura histórico > 1 año' }
+          { name: 'Archive Audit Logs', type: 'Postgres', desc: 'Archiva según AUDIT_RETENTION_YEARS (5 años por defecto)' },
+          { name: 'Purge Old Scores', type: 'Postgres', desc: 'Purga según SCORE_RETENTION_YEARS (2 años por defecto)' },
+          { name: 'Log Run', type: 'Postgres', desc: 'Registra el resultado en monitoring_jobs' }
         ];
       default:
         return [];
