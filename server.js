@@ -128,8 +128,8 @@ function createPortalToken(payload) {
 
 function verifyPortalToken(token) {
   const secret = process.env.PORTAL_TOKEN_SECRET;
-  if (!secret) {
-    const error = new Error('PORTAL_TOKEN_SECRET no está configurado en el backend.');
+  if (!secret || secret.length < 32) {
+    const error = new Error('PORTAL_TOKEN_SECRET debe estar configurado y contener al menos 32 caracteres aleatorios.');
     error.status = 503;
     throw error;
   }
