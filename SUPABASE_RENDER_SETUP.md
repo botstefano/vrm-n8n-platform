@@ -72,8 +72,8 @@ Crea/configura en n8n:
 
 1. Credencial PostgreSQL llamada `Postgres VRM`, apuntando a la base PostgreSQL del proyecto Supabase. Usa los datos de conexión que entrega el botón Connect de Supabase. Si el host Direct no es accesible desde el entorno de n8n, utiliza Session Pooler y la cadena/puerto que proporciona Supabase.
 2. Credencial de Header Auth llamada `VRM Alerts Webhook Auth`, con el mismo valor que `ALERTS_WEBHOOK_TOKEN` y el nombre de header que el workflow WF-06 espera (`X-Alert-Token`).
-3. Configura las credenciales referenciadas por los nodos de NVD, Shodan, Redis y SMTP. Para WF-05, configura `SMTP VRM` y `SMTP_FROM`; el nodo de invitación solo envía correo cuando el proveedor tiene un email de contacto.
-4. Configura en el entorno de n8n `N8N_WEBHOOK_SECRET`, `PORTAL_TOKEN_SECRET`, `VRM_PORTAL_URL`, `VRM_BACKEND_URL`, `N8N_BASE_URL`, `SMTP_FROM` y las demás variables que utilicen los workflows. `N8N_WEBHOOK_SECRET` debe coincidir con el valor de Render y n8n lo envía al backend en `X-N8N-Signature`. `PORTAL_TOKEN_SECRET` debe coincidir exactamente entre n8n y la API de Render. `VRM_PORTAL_URL` debe ser la URL pública del frontend terminada en `/portal`.
+3. Configura las credenciales referenciadas por los nodos de NVD, Shodan, Redis y SMTP. Para WF-05, configura `SMTP VRM` y `SMTP_FROM`; el nodo de invitación solo envía correo cuando el proveedor tiene un email de contacto. El correo se envía después de que la API registre el hash del enlace firmado en Supabase.
+4. Configura en el entorno de n8n `N8N_WEBHOOK_SECRET`, `PORTAL_TOKEN_SECRET`, `VRM_PORTAL_URL`, `VRM_BACKEND_URL`, `N8N_BASE_URL`, `SMTP_FROM` y las demás variables que utilicen los workflows. `N8N_WEBHOOK_SECRET` debe coincidir con el valor de Render y n8n lo envía al backend en `X-N8N-Signature`. `PORTAL_TOKEN_SECRET` debe coincidir exactamente entre n8n y la API de Render y tener al menos 32 caracteres aleatorios. `VRM_PORTAL_URL` debe ser la URL pública del frontend terminada en `/portal`; `VRM_BACKEND_URL` es la URL base del Web Service Express. Como estos workflows utilizan variables y módulos nativos desde los Code nodes, en una instancia n8n autogestionada configura `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` y `NODE_FUNCTION_ALLOW_BUILTIN=crypto,tls,dns`, revisando antes las implicaciones de seguridad de permitir acceso a esas variables.
 
 En Render:
 
@@ -92,12 +92,14 @@ No inventes los hosts, puertos ni nombres de conexión: copia los datos de Conne
 3. Revisa la pantalla Salud del Sistema: backend y base de datos deben figurar conectados.
 4. Registra un proveedor de prueba y confirma que aparece en `public.vendors`.
 5. Comprueba que su score inicial se registra en `public.score_history`.
-6. Solo después de importar, configurar y activar los workflows, prueba un disparador manual de n8n.
+6. Crea un proveedor de prueba con email de contacto y fecha de evaluación vencida, ejecuta WF-05 desde la pantalla Evaluaciones y confirma que el correo contiene un enlace público `/portal/assessment/...`.
+7. Abre el enlace en una ventana privada, responde todas las preguntas y envíalo. Verifica que la evaluación pasa a `completed`, se registra la puntuación y un segundo uso del enlace es rechazado.
+8. Solo después de importar, configurar y activar los demás workflows, prueba sus disparadores manuales.
 
 ## 5. Alcance y limitaciones conocidas
 
 - La API implementa login autenticado, validación de JWT/RBAC, bootstrap de datos, operaciones de proveedores, tecnologías, hallazgos, evaluaciones internas, alertas, scorecards y limpieza.
 - Las ejecuciones manuales se envían a n8n mediante webhooks añadidos a los JSON. El estado de aceptación no equivale a que el workflow haya terminado correctamente; el resultado final requiere instrumentar callbacks de cierre de ejecución.
-- El cuestionario actual es un flujo interno de la plataforma. El portal público de proveedores con enlaces HMAC verificables y presentación de respuestas sin sesión todavía requiere una implementación específica; no se debe presentar como funcional hasta completar esa parte.
+- El portal público de proveedores utiliza enlaces HMAC con vencimiento de 30 días y un solo uso. La API valida la firma y el estado del enlace, calcula la puntuación en el servidor y persiste las respuestas en Supabase. La entrega real del correo depende de que el workflow WF-05 y la credencial SMTP estén configurados.
 - La conexión de n8n con PostgreSQL, Redis, NVD, Shodan y SMTP depende de credenciales reales configuradas en tu instancia; el repositorio no contiene esas credenciales.
 - Antes de producción, ejecuta pruebas funcionales, pruebas de permisos por rol, revisión de seguridad y recuperación de errores con tus servicios reales.
