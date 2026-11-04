@@ -387,12 +387,30 @@ app.post('/api/v1/webhooks/n8n/findings-created', requireDatabase, verifyN8nSign
 app.post('/api/v1/webhooks/n8n/assessment-created', requireDatabase, verifyN8nSignature, async (req, res, next) => {
   try {
     const body = req.body || {};
-    await supabase.from('audit_log').insert({
+    if (!body.assessment_id || !body.vendor_id || !body.link) {
+      return res.status(400).json({ error: 'assessment_id, vendor_id y link son obligatorios.' });
+    }
+    const linkUrl = new URL(body.link);
+    const token = linkUrl.pathname.split('/').filter(Boolean).at(-1);
+    const payload = verifyPortalToken(token);
+    if (payload.aid !== body.assessment_id || payload.vid !== body.vendor_id) {
+      return res.status(400).json({ error: 'El enlace HMAC no corresponde a la evaluación informada.' });
+    }
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const { data: assessment, error } = await supabase.from('assessments').update({
+      portal_token_hash: tokenHash,
+      token_expires_at: new Date(Number(payload.exp)).toISOString()
+    }).eq('id', body.assessment_id).eq('vendor_id', body.vendor_id)
+      .in('status', ['pending','in_progress']).select('id').maybeSingle();
+    if (error) throw error;
+    if (!assessment) return res.status(404).json({ error: 'No se encontró una evaluación pendiente para registrar el enlace.' });
+    const { error: auditError } = await supabase.from('audit_log').insert({
       actor: 'n8n', action: 'assessment_invitation_prepared', entity: 'assessments',
-      entity_id: String(body.assessment_id || ''),
-      details: { vendor_id: body.vendor_id, email_present: Boolean(body.email), link_present: Boolean(body.link) }
+      entity_id: String(body.assessment_id),
+      details: { vendor_id: body.vendor_id, email_present: Boolean(body.email), link_registered: true }
     });
-    res.json({ received: true, message: 'Invitación registrada; la entrega del correo depende del workflow/SMTP configurado.' });
+    if (auditError) throw auditError;
+    res.json({ received: true, tokenRegistered: true, emailPresent: Boolean(body.email) });
   } catch (error) { next(error); }
 });
 
