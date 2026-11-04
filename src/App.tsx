@@ -215,6 +215,8 @@ export function App() {
     );
   }
 
+  const canWrite = Boolean(currentUser?.roles?.some((role) => ['admin', 'risk_analyst'].includes(role)));
+  const isAdmin = Boolean(currentUser?.roles?.includes('admin'));
   const openFindingsCount = findings.filter((finding) => finding.status === 'open' || finding.status === 'in_progress').length;
 
   return (
@@ -225,6 +227,7 @@ export function App() {
         openCount={openFindingsCount}
         alertsCount={alerts.length}
         activeRole={activeRole}
+        canWrite={canWrite}
         onQuickRun={handleQuickRun}
         userEmail={currentUser?.email || session.user.email || ''}
         onSignOut={handleSignOut}
@@ -263,10 +266,11 @@ export function App() {
             onSelectVendor={setSelectedVendorId}
             onOpenFindingTab={() => setCurrentTab('findings')}
             onRecalculateScorecard={(vendorId) => store.recalculateScorecard(vendorId)}
+            canWrite={canWrite} isAdmin={isAdmin}
           />
         )}
         {currentTab === 'findings' && (
-          <FindingsView findings={findings} vendors={vendors}
+          <FindingsView findings={findings} vendors={vendors} canWrite={canWrite}
             onSelectVendor={(vendorId) => { setSelectedVendorId(vendorId); setCurrentTab('vendors'); }}
           />
         )}
@@ -274,15 +278,17 @@ export function App() {
           <WorkflowsView jobs={jobs} logs={workflowLogs}
             onExecuteWorkflow={handleExecuteWorkflow}
             isExecuting={isExecuting} executingWfId={executingWfId}
+            canWrite={canWrite} isAdmin={isAdmin}
           />
         )}
         {currentTab === 'assessments' && (
           <AssessmentsView assessments={assessments} vendors={vendors} questionnaires={questionnaires}
             onSelectVendor={(vendorId) => { setSelectedVendorId(vendorId); setCurrentTab('vendors'); }}
             onExecuteWorkflow={handleExecuteWorkflow}
+            canWrite={canWrite}
           />
         )}
-        {currentTab === 'alerts' && <AlertsView alerts={alerts} vendors={vendors} />}
+        {currentTab === 'alerts' && <AlertsView alerts={alerts} vendors={vendors} canWrite={canWrite} />}
         {currentTab === 'health' && (
           <HealthView jobs={jobs} onExecuteWorkflow={handleExecuteWorkflow} isExecuting={isExecuting} />
         )}
@@ -291,6 +297,7 @@ export function App() {
           vendors={vendors} technologies={technologies} findings={findings}
           assessments={assessments} scoreHistory={scoreHistory}
           onExecuteWorkflow={handleExecuteWorkflow}
+          canCleanup={isAdmin}
         />}
       </main>
 
