@@ -9,7 +9,7 @@ insert into public.roles (code, name) values
 on conflict (code) do update set name = excluded.name;
 
 insert into public.questionnaires (name, version, is_active, definition)
-values (
+select 
   'Cuestionario de seguridad estándar (ISO 27001 / SOC 2)',
   1,
   true,
@@ -35,6 +35,8 @@ values (
       }
     ]
   }
-  $$::jsonb
-)
-on conflict (name, version) do nothing;
+  $::jsonb
+where not exists (
+  select 1 from public.questionnaires
+  where name = 'Cuestionario de seguridad estándar (ISO 27001 / SOC 2)' and version = 1
+);
