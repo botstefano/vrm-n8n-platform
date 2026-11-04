@@ -168,8 +168,8 @@
     },
     {
       "parameters": {
-        "fromEmail": "={{ $env.SMTP_FROM }}",
-        "toEmail": "={{ $env.SMTP_FROM }}",
+        "fromEmail": "={{ $vars.SMTP_FROM }}",
+        "toEmail": "={{ $vars.SMTP_FROM }}",
         "subject": "=VRM Digest Semanal — {{ $now.toFormat('yyyy-MM-dd') }}",
         "emailFormat": "html",
         "html": "={{ $('Build Digest HTML').first().json.html }}",
@@ -235,23 +235,16 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-N8N-Signature",
-              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
-            }
-          ]
-        },
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
           "timeout": 10000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "manual-completion-http-wf-09",
       "name": "Report Manual Completion",
@@ -261,7 +254,13 @@
         2380,
         520
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
     }
   ],
   "connections": {
