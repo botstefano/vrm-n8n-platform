@@ -145,6 +145,17 @@ jobs:
           const nvdPageSize = nvdRequest?.parameters?.queryParameters?.parameters
             ?.find((parameter) => parameter.name === 'resultsPerPage')?.value;
           if (String(nvdPageSize) !== '2000') throw new Error('WF-01 must request the NVD maximum page size (2000)');
+          const nvdPagination = nvdRequest?.parameters?.options?.pagination?.pagination;
+          if (nvdPagination?.paginationMode !== 'updateAParameterInEachRequest' ||
+              nvdPagination?.parameters?.parameters?.[0]?.name !== 'startIndex' ||
+              nvdPagination?.maxRequests !== 50 ||
+              nvdPagination?.requestInterval !== 6000) {
+            throw new Error('WF-01 must paginate NVD results with a bounded page count and rate-limit interval');
+          }
+          const nvdParser = nvd.nodes.find((node) => node.name === 'Parse CVEs')?.parameters?.jsCode || '';
+          if (!nvdParser.includes('state.lastEnd < state.totalResults')) {
+            throw new Error('WF-01 must report incomplete scans when the pagination limit is reached');
+          }
 
           const tls = JSON.parse(fs.readFileSync(`${path}/wf-03-tls-expiry.json`, 'utf8'));
           const tlsInsert = tls.nodes.find((node) => node.name === 'Insert Finding');
