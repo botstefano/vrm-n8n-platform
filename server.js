@@ -645,17 +645,24 @@ app.post('/api/assessments/reevaluate', allowRoles('admin','risk_analyst'), asyn
         .eq('vendor_id', vendor.id).in('status', ['pending','in_progress']).limit(1);
       if (pendingError) throw pendingError;
       if (pending?.length) continue;
+      const assessmentId = crypto.randomUUID();
+      const exp = Date.now() + 30 * 86400000;
+      const portal = createPortalToken({ aid: assessmentId, vid: vendor.id, exp });
       const { data: assessment, error: assessmentError } = await supabase.from('assessments').insert({
-        vendor_id: vendor.id, questionnaire_id: questionnaires[0].id, status: 'pending', started_at: new Date().toISOString()
+        id: assessmentId, vendor_id: vendor.id, questionnaire_id: questionnaires[0].id,
+        status: 'pending', started_at: new Date().toISOString(),
+        portal_token_hash: portal.hash, token_expires_at: portal.expiresAt
       }).select().single();
       if (assessmentError) throw assessmentError;
       const intervalDays = Number(vendor.criticality) >= 4 ? 90 : Number(vendor.criticality) === 3 ? 180 : 365;
-      await supabase.from('vendors').update({
+      const { error: vendorUpdateError } = await supabase.from('vendors').update({
         status: 'reevaluation',
         next_evaluation: new Date(Date.now() + intervalDays * 86400000).toISOString()
       }).eq('id', vendor.id);
+      if (vendorUpdateError) throw vendorUpdateError;
       await writeAudit(req, 'create_assessment', 'assessments', assessment.id, { vendor_id: vendor.id });
-      created.push(assessment);
+      const frontendBase = (FRONTEND_ORIGINS[0] || '').replace(/\\/$/, '');
+      created.push({ ...assessment, portal_link: frontendBase ? frontendBase + '/portal/assessment/' + portal.token : null });
     }
     res.json({ assessmentsCreated: created.length, assessments: created });
   } catch (error) { next(error); }
