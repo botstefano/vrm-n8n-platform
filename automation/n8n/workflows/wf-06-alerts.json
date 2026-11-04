@@ -205,12 +205,11 @@
           "name": "Postgres VRM"
         }
       },
-      "alwaysOutputData": true,
-      "onError": "continueRegularOutput"
+      "alwaysOutputData": true
     },
     {
       "parameters": {
-        "jsCode": "const row = $input.first()?.json || {};\nconst list = Array.isArray(row.emails) ? row.emails.filter(Boolean) : [];\nconst to = list.join(',') || $env.ALERT_FALLBACK_EMAIL || $env.SMTP_FROM || '';\nreturn to ? [{ json: { to } }] : [];"
+        "jsCode": "const row = $input.first()?.json || {};\nconst emails = Array.isArray(row.emails) ? row.emails.filter(Boolean) : [];\nconst fallback = String($env.ALERT_FALLBACK_EMAIL || '').trim();\nconst to = emails.length ? emails.join(',') : fallback;\nif (!to) {\n  throw new Error('Alerta crítica/alta: no existen destinatarios RBAC activos. Configura ALERT_FALLBACK_EMAIL en n8n.');\n}\nreturn [{ json: { to } }];"
       },
       "id": "join",
       "name": "Join Recipients",
@@ -244,7 +243,9 @@
           "name": "SMTP VRM"
         }
       },
-      "onError": "continueRegularOutput"
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
