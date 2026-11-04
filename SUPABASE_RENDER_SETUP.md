@@ -95,7 +95,7 @@ Variables adicionales usadas por los workflows de n8n:
 | Variable | Uso |
 |---|---|
 | `SLACK_WEBHOOK_URL` | Incoming Webhook del canal de alertas |
-| `ALERT_FALLBACK_EMAIL` | Destinatario alternativo si no se encuentran usuarios RBAC |
+| `ALERT_FALLBACK_EMAIL` | Destinatario alternativo obligatorio para alertas críticas/altas si no hay usuarios RBAC activos |
 | `SMTP_FROM` | Dirección remitente usada por los nodos SMTP |
 | `NVD_MIN_CVSS` | Umbral CVSS (por defecto 7) |
 | `CT_LOOKBACK_DAYS` | Ventana de búsqueda de certificados (por defecto 3 días) |
