@@ -218,14 +218,6 @@ class VrmStore {
         this.remote(apiRequest(`/api/findings/${existing.id}`, {
           method: 'PATCH', body: { severity: findingData.severity }
         }));
-        this.dispatchAlert({
-          severity: findingData.severity,
-          title: `[ESCALATED] ${findingData.title}`,
-          vendor_id: findingData.vendor_id,
-          source: findingData.source,
-          source_ref: findingData.source_ref,
-          description: findingData.description
-        });
         this.notify();
       }
       return null;
@@ -239,18 +231,7 @@ class VrmStore {
     };
     this.findings.unshift(newFinding);
 
-    // Check if severe: critical/high triggers alert
-    if (newFinding.severity === 'critical' || newFinding.severity === 'high') {
-      this.dispatchAlert({
-        severity: newFinding.severity,
-        title: newFinding.title,
-        vendor_id: newFinding.vendor_id,
-        source: newFinding.source,
-        source_ref: newFinding.source_ref,
-        description: newFinding.description
-      });
-    }
-
+    // The API creates the finding first and dispatches alerts only after persistence succeeds.
     this.remote(apiRequest('/api/findings', { method: 'POST', body: newFinding }));
     this.notify();
     return newFinding;
