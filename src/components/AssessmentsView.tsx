@@ -32,6 +32,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
   onSelectVendor
 }) => {
   const [selectedAssessmentForPortal, setSelectedAssessmentForPortal] = useState<Assessment | null>(null);
+  const [copiedPortalId, setCopiedPortalId] = useState<string | null>(null);
 
   // Internal assessment response form
   const [qAnswers, setQAnswers] = useState<Record<string, boolean>>({
@@ -57,6 +58,17 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
       alert(`Se crearon ${result.assessmentsCreated} evaluaciones en Supabase.`);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'No se pudieron crear las evaluaciones.');
+    }
+  };
+
+  const handleCopyPortalLink = async (assessment: Assessment) => {
+    if (!assessment.portal_link) return;
+    try {
+      await navigator.clipboard.writeText(assessment.portal_link);
+      setCopiedPortalId(assessment.id);
+      window.setTimeout(() => setCopiedPortalId(null), 2000);
+    } catch {
+      alert('No se pudo copiar el enlace. Ábrelo y copia la URL desde el navegador.');
     }
   };
 
@@ -213,13 +225,30 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
 
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => setSelectedAssessmentForPortal(asm)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800"
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            <span>Abrir evaluación</span>
-                          </button>
+                          {asm.portal_link && asm.status !== 'completed' ? (
+                            <>
+                              <a
+                                href={asm.portal_link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                <span>Abrir portal</span>
+                              </a>
+                              <button
+                                onClick={() => handleCopyPortalLink(asm)}
+                                title="Copiar enlace seguro"
+                                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
+                              >
+                                {copiedPortalId === asm.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                              </button>
+                            </>
+                          ) : asm.status !== 'completed' ? (
+                            <span className="text-[10px] text-slate-500">Enlace pendiente</span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-400">Completada</span>
+                          )}
                         </div>
                       </td>
                     </tr>
