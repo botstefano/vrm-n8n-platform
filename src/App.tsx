@@ -211,7 +211,6 @@ export function App() {
         openCount={openFindingsCount}
         alertsCount={alerts.length}
         activeRole={activeRole}
-        onSelectRole={setActiveRole}
         onQuickRun={handleQuickRun}
         userEmail={currentUser?.email || session.user.email || ''}
         onSignOut={handleSignOut}
