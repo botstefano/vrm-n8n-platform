@@ -23,6 +23,7 @@ export type NavTab =
   | 'audit';
 
 interface NavigationProps {
+  canWrite: boolean;
   currentTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   openCount: number;
@@ -39,6 +40,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   openCount,
   alertsCount,
   activeRole,
+  canWrite,
   onQuickRun,
   userEmail,
   onSignOut
@@ -78,14 +80,14 @@ export const Navigation: React.FC<NavigationProps> = ({
           {/* Quick Actions & Role Switcher */}
           <div className="flex items-center gap-3">
             {/* Quick Run All Workflows */}
-            <button
+            {canWrite && <button
               onClick={onQuickRun}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 transition-all hover:scale-[1.02]"
               title="Disparar escaneo completo y recálculo de scorecards"
             >
               <RefreshCw className="w-3.5 h-3.5 animate-spin-hover" />
               <span>Ejecutar Escaneos</span>
-            </button>
+            </button>}
 
             <div className="hidden md:flex flex-col items-end text-right leading-tight max-w-[210px]">
               <span className="text-xs font-semibold text-slate-200 truncate">{userEmail}</span>
