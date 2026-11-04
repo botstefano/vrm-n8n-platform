@@ -24,7 +24,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT v.id, v.legal_name, v.criticality, v.current_risk,\n       v.primary_contact->>'email' AS email,\n       CASE WHEN v.criticality >= 4 THEN 90 WHEN v.criticality = 3 THEN 180 ELSE 365 END AS interval_days\nFROM vendors v\nWHERE v.status IN ('approved','conditional','monitoring')\n  AND (v.next_evaluation IS NULL OR v.next_evaluation <= now())\n  AND NOT EXISTS (SELECT 1 FROM assessments a\n                  WHERE a.vendor_id = v.id AND a.status IN ('pending','in_progress'))\nORDER BY v.criticality DESC, v.next_evaluation NULLS FIRST\nLIMIT 50;",
+        "query": "SELECT v.id, v.legal_name, v.criticality, v.current_risk,\n       v.primary_contact->>'email' AS email,\n       CASE WHEN v.criticality >= 4 THEN 90 WHEN v.criticality = 3 THEN 180 ELSE 365 END AS interval_days\nFROM vendors v\nWHERE (\n    (v.status IN ('approved','conditional','monitoring') AND (v.next_evaluation IS NULL OR v.next_evaluation <= now()))\n    OR (v.status = 'reevaluation' AND EXISTS (\n      SELECT 1 FROM assessments expired\n      WHERE expired.vendor_id = v.id AND expired.status = 'expired'\n    ))\n  )\n  AND NOT EXISTS (SELECT 1 FROM assessments a\n                  WHERE a.vendor_id = v.id AND a.status IN ('pending','in_progress'))\nORDER BY v.criticality DESC, v.next_evaluation NULLS FIRST\nLIMIT 50;",
         "options": {}
       },
       "id": "pg-due",
