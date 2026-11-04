@@ -17,7 +17,7 @@ for (const file of files) {
   const serialized = JSON.stringify(workflow);
 
   if (serialized.includes('$env.')) throw new Error(`${file}: n8n Cloud workflow must use $vars or Credentials, not $env.`);
-  if (/\\$vars\\.(?:N8N_WEBHOOK_SECRET|ALERTS_WEBHOOK_TOKEN|PORTAL_TOKEN_SECRET|SLACK_WEBHOOK_URL|SHODAN_API_KEY)/.test(serialized)) {
+  if (/\$vars\.(?:N8N_WEBHOOK_SECRET|ALERTS_WEBHOOK_TOKEN|PORTAL_TOKEN_SECRET|SLACK_WEBHOOK_URL|SHODAN_API_KEY)/.test(serialized)) {
     throw new Error(`${file}: secret material must not be stored in n8n custom Variables.`);
   }
 
@@ -31,7 +31,7 @@ for (const file of files) {
   for (const node of nodes) {
     if (node.type === 'n8n-nodes-base.code') {
       const codeText = node.parameters?.jsCode || '';
-      if (/\\brequire\\s*\\(/.test(codeText)) throw new Error(`${file} / ${node.name}: Cloud Code node cannot import Node/npm modules.`);
+      if (/\brequire\s*\(/.test(codeText)) throw new Error(`${file} / ${node.name}: Cloud Code node cannot import Node/npm modules.`);
       new AsyncFunction(codeText);
     }
     if (node.type === 'n8n-nodes-base.httpRequest') {
@@ -70,7 +70,7 @@ const attack = byFile('wf-04-attack-surface.json');
 if (!String(attack.nodes.find((node) => node.name === 'Resolve IP')?.parameters?.url || '').includes('/resolve-host')) {
   throw new Error('WF-04 must use the backend public-DNS resolver.');
 }
-if (attack.nodes.some((node) => node.type === 'n8n-nodes-base.code' && /\\brequire\\s*\\(/.test(node.parameters?.jsCode || ''))) {
+if (attack.nodes.some((node) => node.type === 'n8n-nodes-base.code' && /\brequire\s*\(/.test(node.parameters?.jsCode || ''))) {
   throw new Error('WF-04 cannot import Node modules in n8n Cloud.');
 }
 
