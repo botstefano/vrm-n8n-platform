@@ -1,61 +1,30 @@
-# Guía de Despliegue en Render (Render.com)
+# Despliegue en Render
 
-Esta plataforma está 100% preparada para desplegarse en **Render** sin configuraciones complejas. Puedes elegir cualquiera de las siguientes alternativas según tu preferencia:
+Esta aplicación se despliega como dos servicios independientes:
 
----
+1. **Static Site:** React/Vite, publicado desde `dist`.
+2. **Web Service:** API Express que valida Supabase Auth/RBAC y accede a PostgreSQL.
 
-## Opción 1: Despliegue Automático mediante Blueprint (`render.yaml`) ⭐ *Más Rápido*
+La configuración detallada, variables de entorno y pasos de n8n está en [SUPABASE_RENDER_SETUP.md](./SUPABASE_RENDER_SETUP.md).
 
-Render detectará automáticamente el archivo `render.yaml` incluido en la raíz del repositorio:
+## Frontend — Static Site
 
-1. Inicia sesión en [Render Dashboard](https://dashboard.render.com/).
-2. Haz clic en **New +** y selecciona **Blueprint**.
-3. Conecta tu repositorio de GitHub (`vrm-n8n-platform`).
-4. Render leerá automáticamente la configuración de `render.yaml` (comando de compilación `npm install && npm run build`, directorio de publicación `dist` y reglas de reescritura SPA).
-5. Haz clic en **Apply** y tu sitio estará en línea en un par de minutos con HTTPS automático y CDN global.
+- Build Command: `npm install && npm run build`
+- Publish Directory: `dist`
+- Variables: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_API_BASE_URL`
 
----
+## Backend — Web Service
 
-## Opción 2: Como "Static Site" (Sitio Estático) — *100% Gratuito en Render*
+- Runtime: Node
+- Build Command: `npm install && npm run build`
+- Start Command: `npm start`
+- Health Check Path: `/health`
+- Variables privadas: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `VRM_FRONTEND_URL`, `N8N_WEBHOOK_SECRET`, `N8N_BASE_URL`, `ALERTS_WEBHOOK_TOKEN`, `N8N_MANUAL_WEBHOOK_BASE_URL`.
 
-Si prefieres configurarlo manualmente en la interfaz web de Render:
+No expongas variables privadas en el Static Site ni en variables `VITE_*`.
 
-1. Ve a [Render Dashboard](https://dashboard.render.com/) y haz clic en **New +** → **Static Site**.
-2. Conecta tu repositorio de GitHub.
-3. Completa los siguientes campos:
-   - **Name**: `vrm-platform` (o el nombre que elijas)
-   - **Branch**: `main` (o tu rama activa)
-   - **Root Directory**: *(dejar en blanco)*
-   - **Build Command**: `npm install && npm run build`
-   - **Publish Directory**: `dist`
-4. Configura la regla de reescritura SPA (para que no dé error 404 al recargar):
-   - En la sección **Redirects/Rewrites**:
-   - **Type**: `Rewrite`
-   - **Source**: `/*`
-   - **Destination**: `/index.html`
-5. Haz clic en **Create Static Site**.
+## Blueprint
 
----
+El archivo `render.yaml` define ambos servicios. Puedes usar **New + → Blueprint** para crear el conjunto a partir del repositorio. Si ya tienes el Static Site configurado manualmente, revisa sus variables y crea el Web Service de API por separado o aplica el Blueprint teniendo cuidado de no duplicar el sitio existente.
 
-## Opción 3: Como "Web Service" (Servidor Node.js con Express)
-
-Si prefieres desplegarlo como un servicio web Node.js completo que incluya el endpoint de monitoreo de salud `/health`:
-
-1. Ve a [Render Dashboard](https://dashboard.render.com/) y haz clic en **New +** → **Web Service**.
-2. Conecta tu repositorio de GitHub.
-3. Completa los siguientes campos:
-   - **Name**: `vrm-platform-service`
-   - **Runtime**: `Node`
-   - **Build Command**: `npm install && npm run build`
-   - **Start Command**: `npm start` (ejecuta `node server.js` y sirve la carpeta `dist`)
-   - **Health Check Path**: `/health`
-4. Render inyectará la variable de entorno `PORT` automáticamente y el servidor Express se vinculará a `0.0.0.0:$PORT`.
-5. Haz clic en **Create Web Service**.
-
----
-
-## Verificación Post-Despliegue
-
-Una vez completado el despliegue:
-- La aplicación cargará con todas las capacidades del **Centro de Automatización n8n (11 Workflows)**, matriz de proveedores, escáneres de vulnerabilidades y simuladores de alerta.
-- Si usaste la Opción 3 (Web Service), puedes comprobar el estado de salud en `https://tu-app.onrender.com/health`.
+Consulta [SUPABASE_RENDER_SETUP.md](./SUPABASE_RENDER_SETUP.md) antes de realizar el despliegue.
