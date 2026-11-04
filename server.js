@@ -327,7 +327,7 @@ async function dispatchAlertRecord(payload, reqUser = null) {
       const response = await fetch(process.env.N8N_BASE_URL.replace(/\/$/, '') + '/webhook/vrm-alerts', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'X-Alert-Token': process.env.ALERTS_WEBHOOK_TOKEN },
-        body: JSON.stringify({ ...payload, severity, fingerprint })
+        body: JSON.stringify({ ...payload, severity, fingerprint, alert_id: data.id })
       });
       const responseBody = await response.json().catch(() => ({}));
       finalDeliveryStatus = !response.ok ? 'failed' : (responseBody.deduped ? 'deduped' : 'sent');
@@ -471,6 +471,54 @@ app.post('/api/v1/webhooks/n8n/assessment-created', requireDatabase, verifyN8nSi
     });
     if (auditError) throw auditError;
     res.json({ received: true, tokenRegistered: true, emailPresent: Boolean(body.email) });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/webhooks/n8n/alert-dispatched', requireDatabase, verifyN8nSignature, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const severity = ['critical','high','medium','low','info'].includes(body.severity) ? body.severity : 'medium';
+    const route = ['critical','high'].includes(severity) ? 'slack+email' : 'slack';
+    const deliveryStatus = String(body.delivery_status || '');
+    if (!['sent','deduped','failed'].includes(deliveryStatus)) {
+      return res.status(400).json({ error: 'delivery_status debe ser sent, deduped o failed.' });
+    }
+    const title = String(body.title || 'Alerta VRM').slice(0, 300);
+    const fingerprint = String(body.fingerprint || [
+      body.source || 'unknown', body.source_ref || title, body.vendor_id || '', severity
+    ].join(':')).slice(0, 500);
+    const details = {
+      ...(body.details && typeof body.details === 'object' ? body.details : {}),
+      callback_received_at: new Date().toISOString()
+    };
+
+    if (body.alert_id) {
+      const { data, error } = await supabase.from('alert_notifications').update({
+        delivery_status: deliveryStatus,
+        delivery_meta: details
+      }).eq('id', body.alert_id).select().maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'No existe la alerta indicada para actualizar su estado.' });
+      res.json({ received: true, alert_id: data.id, delivery_status: deliveryStatus, updated: true });
+      return;
+    }
+
+    const vendorId = body.vendor_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(body.vendor_id))
+      ? body.vendor_id : null;
+    const { data, error } = await supabase.from('alert_notifications').insert({
+      vendor_id: vendorId,
+      severity,
+      route,
+      title,
+      fingerprint,
+      source: body.source || null,
+      source_ref: body.source_ref || null,
+      description: body.description ? String(body.description).slice(0, 4000) : null,
+      delivery_status: deliveryStatus,
+      delivery_meta: details
+    }).select().single();
+    if (error) throw error;
+    res.status(201).json({ received: true, alert_id: data.id, delivery_status: deliveryStatus, created: true });
   } catch (error) { next(error); }
 });
 
