@@ -242,7 +242,12 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                     {isRunningThis ? (
                       <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
                     ) : (
-                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                      <span className={`w-2 h-2 rounded-full ${
+                        job?.status === 'healthy' ? 'bg-emerald-400'
+                        : job?.status === 'failed' ? 'bg-rose-400'
+                        : job?.status === 'overdue' ? 'bg-amber-400'
+                        : 'bg-slate-500'
+                      }`} />
                     )}
                   </div>
 
@@ -325,9 +330,13 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
             {activeTab === 'pipeline' && (
               <div className="space-y-4 pt-2">
                 <div className="text-[11px] text-slate-400 flex items-center justify-between">
-                  <span>Secuencia de Nodos y Conexiones en n8n:</span>
+                  <span>Secuencia resumida de nodos definida en el repositorio:</span>
                   <span className="font-mono text-cyan-400">Error Workflow: WF-00</span>
                 </div>
+                <p className="text-[10px] text-slate-500">
+                  “Definido” confirma que el paso está descrito en el JSON; no significa que el workflow esté importado,
+                  activo o conectado a credenciales reales. El punto de estado de cada workflow refleja la última ejecución registrada.
+                </p>
 
                 <div className="relative space-y-3">
                   {getPipelineNodes(selectedWf.id).map((node, idx, arr) => (
@@ -349,8 +358,8 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                         </div>
 
                         <div className="text-right">
-                          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
-                            Ready
+                          <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                            Definido
                           </span>
                         </div>
                       </div>
