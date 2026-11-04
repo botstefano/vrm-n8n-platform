@@ -111,8 +111,8 @@ function verifyN8nSignature(req, res, next) {
 
 function createPortalToken(payload) {
   const secret = process.env.PORTAL_TOKEN_SECRET;
-  if (!secret) {
-    const error = new Error('PORTAL_TOKEN_SECRET no está configurado en el backend.');
+  if (!secret || secret.length < 32) {
+    const error = new Error('PORTAL_TOKEN_SECRET debe estar configurado y contener al menos 32 caracteres aleatorios.');
     error.status = 503;
     throw error;
   }
@@ -324,6 +324,10 @@ app.post('/api/public/assessments/:token/complete', requireDatabase, async (req,
     }
     const questions = (questionnaire.definition?.sections || []).flatMap((section) => section.questions || []);
     if (!questions.length) return res.status(409).json({ error: 'El cuestionario no contiene preguntas configuradas.' });
+    const questionIds = new Set(questions.map((question) => question.id));
+    if (Object.keys(responses).some((id) => !questionIds.has(id))) {
+      return res.status(400).json({ error: 'El formulario contiene respuestas que no pertenecen a este cuestionario.' });
+    }
     for (const question of questions) {
       if (typeof responses[question.id] !== 'boolean') {
         return res.status(400).json({ error: 'Responde todas las preguntas antes de enviar la evaluación.' });
@@ -358,9 +362,14 @@ app.post('/api/public/assessments/:token/complete', requireDatabase, async (req,
       entity_id: assessment.id,
       details: { vendor_id: vendor.id, score }
     });
-    if (auditError) throw auditError;
-    await recalculateVendorScore(vendor.id);
-    res.json({ completed: true, score, message: 'La evaluación fue registrada correctamente.' });
+    if (auditError) console.error('Assessment audit insert failed:', auditError.message);
+    let scorecardUpdated = true;
+    try { await recalculateVendorScore(vendor.id); }
+    catch (scoreError) {
+      scorecardUpdated = false;
+      console.error('Assessment scorecard refresh failed:', scoreError.message);
+    }
+    res.json({ completed: true, score, scorecardUpdated, message: 'La evaluación fue registrada correctamente.' });
   } catch (error) { next(error); }
 });
 
