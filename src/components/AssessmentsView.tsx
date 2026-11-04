@@ -15,6 +15,7 @@ interface AssessmentsViewProps {
   questionnaires: Questionnaire[];
   onSelectVendor: (vendorId: string) => void;
   onExecuteWorkflow: (workflowId: string) => Promise<void>;
+  canWrite: boolean;
 }
 
 export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
@@ -22,7 +23,8 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
   vendors,
   questionnaires,
   onSelectVendor,
-  onExecuteWorkflow
+  onExecuteWorkflow,
+  canWrite
 }) => {
   const [copiedPortalId, setCopiedPortalId] = useState<string | null>(null);
 
@@ -69,13 +71,15 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={handleTriggerReevaluations}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white shadow-md shadow-cyan-950 transition-colors"
-        >
-          <Play className="w-3.5 h-3.5" />
-          <span>Disparar Reevaluación (WF-05)</span>
-        </button>
+        {canWrite && (
+          <button
+            onClick={handleTriggerReevaluations}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white shadow-md shadow-cyan-950 transition-colors"
+          >
+            <Play className="w-3.5 h-3.5" />
+            <span>Disparar Reevaluación (WF-05)</span>
+          </button>
+        )}
       </div>
 
       {/* Due Vendors Alert Banner */}
@@ -93,12 +97,14 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={handleTriggerReevaluations}
-            className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs"
-          >
-            Crear reevaluaciones
-          </button>
+          {canWrite && (
+            <button
+              onClick={handleTriggerReevaluations}
+              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs"
+            >
+              Crear reevaluaciones
+            </button>
+          )}
         </div>
       )}
 
@@ -188,7 +194,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
 
                       <td className="py-3 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {asm.portal_link && asm.status !== 'completed' ? (
+                          {canWrite && asm.portal_link && asm.status !== 'completed' ? (
                             <>
                               <a
                                 href={asm.portal_link}
