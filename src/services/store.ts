@@ -569,10 +569,10 @@ class VrmStore {
     );
     const entry: WorkflowRunLog = {
       id: createId(), workflowId, workflowName: workflowId.toUpperCase(),
-      startedAt, completedAt: new Date().toISOString(), status: 'success', steps: [],
+      startedAt, status: 'running', steps: [],
       summary: response.status === 'accepted'
-        ? 'La solicitud de ejecución fue enviada a n8n.'
-        : 'Solicitud aceptada.'
+        ? 'n8n aceptó la solicitud. El resultado final se registrará cuando el workflow termine.'
+        : 'Solicitud recibida por el servicio de automatización.'
     };
     this.workflowLogs.unshift(entry);
     this.notify();
