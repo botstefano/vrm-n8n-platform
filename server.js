@@ -372,10 +372,10 @@ app.post('/api/public/assessments/:token/complete', requireDatabase, async (req,
     if (error) throw error;
     if (!saved) return res.status(409).json({ error: 'La evaluación ya fue enviada o el enlace fue utilizado.' });
 
-    const { error: vendorStatusError } = await supabase.from('vendors').update({
+    const { data: updatedVendor, error: vendorStatusError } = await supabase.from('vendors').update({
       status: score >= 75 ? 'approved' : 'conditional'
-    }).eq('id', vendor.id).eq('status', 'reevaluation');
-    const vendorStatusUpdated = !vendorStatusError;
+    }).eq('id', vendor.id).eq('status', 'reevaluation').select('id').maybeSingle();
+    const vendorStatusUpdated = !vendorStatusError && Boolean(updatedVendor);
     if (vendorStatusError) console.error('Assessment saved, but vendor status update failed:', vendorStatusError.message);
     const { error: auditError } = await supabase.from('audit_log').insert({
       actor: 'vendor_portal',
@@ -531,7 +531,7 @@ app.get('/api/bootstrap', async (req, res, next) => {
           : job.status === 'error' || job.status === 'failed' ? 'failed'
           : job.status === 'partial' ? 'overdue' : (job.status || 'idle')
       })),
-      users: rows.users.map((u) => ({ ...u, full_name: u.full_name || u.email, roles: roleMap.get(u.id) || [] })),
+      users: rows.users.filter((u) => u.id === req.user.profile_id).map((u) => ({ ...u, full_name: u.full_name || u.email, roles: roleMap.get(u.id) || [] })),
       auditLog: rows.audit_log.map((entry) => ({ ...entry, actor: entry.actor || 'system', entity: entry.entity || '', entity_id: entry.entity_id || '', details: entry.details || {} })),
       auditArchive: rows.audit_log_archive.map((entry) => ({ ...entry, actor: entry.actor || 'system', entity: entry.entity || '', entity_id: entry.entity_id || '', details: entry.details || {} })),
       scoreHistory: rows.score_history.map((entry) => ({ ...entry, score: Number(entry.score || 0) })),
@@ -715,16 +715,17 @@ app.post('/api/assessments/:id/complete', allowRoles('admin','risk_analyst'), as
     if (error) throw error;
     if (!data) return res.status(409).json({ error: 'La evaluación ya fue completada o no admite más respuestas.' });
     const nextVendorStatus = score >= 75 ? 'approved' : 'conditional';
-    const { error: vendorStatusError } = await supabase.from('vendors').update({ status: nextVendorStatus })
-      .eq('id', data.vendor_id).eq('status', 'reevaluation');
-    await writeAudit(req, 'complete_assessment', 'assessments', data.id, { score, vendor_status_updated: !vendorStatusError });
+    const { data: updatedVendor, error: vendorStatusError } = await supabase.from('vendors').update({ status: nextVendorStatus })
+      .eq('id', data.vendor_id).eq('status', 'reevaluation').select('id').maybeSingle();
+    const vendorStatusUpdated = !vendorStatusError && Boolean(updatedVendor);
+    await writeAudit(req, 'complete_assessment', 'assessments', data.id, { score, vendor_status_updated: vendorStatusUpdated });
     let scorecardUpdated = true;
     try { await recalculateVendorScore(data.vendor_id); }
     catch (scoreError) {
       scorecardUpdated = false;
       console.error('Assessment scorecard refresh failed:', scoreError.message);
     }
-    res.json({ ...data, vendorStatusUpdated: !vendorStatusError, scorecardUpdated });
+    res.json({ ...data, vendorStatusUpdated, scorecardUpdated });
   } catch (error) { next(error); }
 });
 
