@@ -9,22 +9,9 @@ import {
   AuditLogEntry,
   ScoreHistoryEntry,
   AlertNotification,
-  RiskLevel,
   FindingSeverity,
   FindingStatus,
-  VendorStatus
 } from '../types';
-import {
-  INITIAL_VENDORS,
-  INITIAL_TECHNOLOGIES,
-  INITIAL_QUESTIONNAIRES,
-  INITIAL_ASSESSMENTS,
-  INITIAL_FINDINGS,
-  INITIAL_MONITORING_JOBS,
-  INITIAL_USERS,
-  INITIAL_AUDIT_LOGS,
-  INITIAL_SCORE_HISTORY
-} from '../data/seedData';
 import { apiRequest } from './api';
 
 function createId(): string { return crypto.randomUUID(); }
@@ -111,28 +98,7 @@ class VrmStore {
   }
 
   private notify() {
-    this.persist();
     this.listeners.forEach((l) => l());
-  }
-
-  private persist() {
-    // Persistence is performed explicitly by authenticated API operations.
-  }
-
-  public resetToDefaults() {
-    this.vendors = [...INITIAL_VENDORS];
-    this.technologies = [...INITIAL_TECHNOLOGIES];
-    this.questionnaires = [...INITIAL_QUESTIONNAIRES];
-    this.assessments = [...INITIAL_ASSESSMENTS];
-    this.findings = [...INITIAL_FINDINGS];
-    this.monitoringJobs = [...INITIAL_MONITORING_JOBS];
-    this.users = [...INITIAL_USERS];
-    this.auditLog = [...INITIAL_AUDIT_LOGS];
-    this.auditArchive = [];
-    this.scoreHistory = [...INITIAL_SCORE_HISTORY];
-    this.alerts = [];
-    this.workflowLogs = [];
-    this.notify();
   }
 
   // Getters
@@ -185,7 +151,6 @@ class VrmStore {
     this.vendors.unshift(newVendor);
     this.logAudit('admin@vrm.local', 'insert_vendor', 'vendors', id, { legal_name: newVendor.legal_name });
     this.remote(apiRequest('/api/vendors', { method: 'POST', body: newVendor }));
-    this.recalculateScorecard(id);
     this.notify();
     return newVendor;
   }
@@ -198,7 +163,6 @@ class VrmStore {
         ...updates,
         updated_at: new Date().toISOString()
       };
-      this.logAudit('admin@vrm.local', 'update_vendor', 'vendors', id, updates);
       this.remote(apiRequest(`/api/vendors/${id}`, { method: 'PATCH', body: updates }));
       this.notify();
     }
@@ -212,7 +176,6 @@ class VrmStore {
     this.assessments = this.assessments.filter((a) => a.vendor_id !== id);
     this.scoreHistory = this.scoreHistory.filter((sh) => sh.vendor_id !== id);
     if (v) {
-      this.logAudit('admin@vrm.local', 'delete_vendor', 'vendors', id, { name: v.legal_name });
       this.remote(apiRequest(`/api/vendors/${id}`, { method: 'DELETE' }));
     }
     this.notify();
@@ -225,10 +188,6 @@ class VrmStore {
       id: createId()
     };
     this.technologies.push(newTech);
-    this.logAudit('admin@vrm.local', 'insert_technology', 'vendor_technologies', newTech.id, {
-      product: newTech.product_name,
-      cpe: newTech.cpe_match
-    });
     this.remote(apiRequest('/api/technologies', { method: 'POST', body: newTech }));
     this.notify();
     return newTech;
@@ -257,10 +216,6 @@ class VrmStore {
         this.remote(apiRequest(`/api/findings/${existing.id}`, {
           method: 'PATCH', body: { severity: findingData.severity }
         }));
-        this.logAudit(`n8n:${findingData.source}`, 'escalate_finding', 'vendor_findings', existing.id, {
-          title: existing.title,
-          newSeverity: findingData.severity
-        });
         this.dispatchAlert({
           severity: findingData.severity,
           title: `[ESCALATED] ${findingData.title}`,
@@ -269,7 +224,6 @@ class VrmStore {
           source_ref: findingData.source_ref,
           description: findingData.description
         });
-        this.recalculateScorecard(findingData.vendor_id);
         this.notify();
       }
       return null;
@@ -282,12 +236,6 @@ class VrmStore {
       detected_at: new Date().toISOString()
     };
     this.findings.unshift(newFinding);
-
-    this.logAudit(`n8n:${findingData.source}`, 'insert_finding', 'vendor_findings', id, {
-      title: newFinding.title,
-      severity: newFinding.severity,
-      source: newFinding.source
-    });
 
     // Check if severe: critical/high triggers alert
     if (newFinding.severity === 'critical' || newFinding.severity === 'high') {
@@ -302,7 +250,6 @@ class VrmStore {
     }
 
     this.remote(apiRequest('/api/findings', { method: 'POST', body: newFinding }));
-    this.recalculateScorecard(newFinding.vendor_id);
     this.notify();
     return newFinding;
   }
@@ -316,116 +263,9 @@ class VrmStore {
       if (status === 'closed') {
         f.closed_at = new Date().toISOString();
       }
-      this.logAudit('analista@vrm.local', 'update_finding_status', 'vendor_findings', id, {
-        from: prev,
-        to: status,
-        resolution
-      });
       this.remote(apiRequest(`/api/findings/${id}`, { method: 'PATCH', body: { status, resolution, due_date: f.due_date } }));
-      this.recalculateScorecard(f.vendor_id);
       this.notify();
     }
-  }
-
-  // Scorecard Recalculation (WF-07 logic)
-  public recalculateScorecard(vendorId: string): { score: number; risk: RiskLevel } {
-    const vendor = this.vendors.find((v) => v.id === vendorId);
-    if (!vendor) return { score: 100, risk: 'low' };
-
-    let score = 100.0;
-    const vendorFindings = this.findings.filter((f) => f.vendor_id === vendorId);
-
-    // Criticality factor: 1 => 0.8x, 3 => 1.0x, 5 => 1.3x
-    const critMultiplier = 0.7 + vendor.criticality * 0.12;
-
-    for (const f of vendorFindings) {
-      if (f.status === 'closed') continue;
-
-      let deduction = 0;
-      switch (f.severity) {
-        case 'critical':
-          deduction = 22;
-          break;
-        case 'high':
-          deduction = 12;
-          break;
-        case 'medium':
-          deduction = 5;
-          break;
-        case 'low':
-          deduction = 2;
-          break;
-        case 'info':
-          deduction = 0;
-          break;
-      }
-
-      if (f.status === 'in_progress') {
-        deduction *= 0.6; // 40% reduction while mitigating
-      } else if (f.status === 'accepted') {
-        deduction *= 0.4; // 60% reduction for accepted business risk
-      }
-
-      score -= deduction * critMultiplier;
-    }
-
-    // Overdue evaluation penalty
-    if (vendor.next_evaluation && new Date(vendor.next_evaluation) < new Date()) {
-      score -= 5.0;
-    }
-
-    // Pending assessments penalty
-    const hasPendingAssessment = this.assessments.some(
-      (a) => a.vendor_id === vendorId && (a.status === 'pending' || a.status === 'in_progress')
-    );
-    if (hasPendingAssessment && vendor.status === 'reevaluation') {
-      score -= 3.0;
-    }
-
-    score = Math.max(0.0, Math.min(100.0, Math.round(score * 10) / 10));
-
-    // Map Risk Level
-    let risk: RiskLevel = 'low';
-    if (score < 45) {
-      risk = 'critical';
-    } else if (score < 65) {
-      risk = 'high';
-    } else if (score < 80) {
-      risk = 'medium';
-    } else if (score >= 92 && vendor.criticality <= 3) {
-      risk = 'minimal';
-    } else {
-      risk = 'low';
-    }
-
-    vendor.current_score = score;
-    vendor.current_risk = risk;
-    vendor.updated_at = new Date().toISOString();
-
-    // Record into score_history
-    this.scoreHistory.push({
-      id: Date.now() + Math.floor(Math.random() * 1000),
-      vendor_id: vendorId,
-      score,
-      risk,
-      calculated_at: new Date().toISOString()
-    });
-
-    return { score, risk };
-  }
-
-  public recalculateAllScorecards(): { refreshed: number } {
-    let count = 0;
-    const activeStatuses: VendorStatus[] = ['approved', 'conditional', 'monitoring', 'incident', 'reevaluation'];
-    for (const v of this.vendors) {
-      if (activeStatuses.includes(v.status)) {
-        this.recalculateScorecard(v.id);
-        count++;
-      }
-    }
-    this.updateJobMeta('scorecard_refresh_all', { vendors_refreshed: count, refreshed_at: new Date().toISOString() });
-    this.notify();
-    return { refreshed: count };
   }
 
   // Re-evaluation creation is server-side; signing secrets never run in the browser.
@@ -552,20 +392,6 @@ class VrmStore {
       job.status = status;
       job.result_meta = { ...job.result_meta, ...resultMeta };
     }
-  }
-
-  // Audit Log helper
-  public logAudit(actor: string, action: string, entity: string, entity_id: string, details: Record<string, any>): void {
-    const entry: AuditLogEntry = {
-      id: Date.now() + Math.floor(Math.random() * 1000),
-      created_at: new Date().toISOString(),
-      actor,
-      action,
-      entity,
-      entity_id,
-      details
-    };
-    this.auditLog.unshift(entry);
   }
 
   // Manual runs are delegated to n8n; no simulated successful workflow runs.
