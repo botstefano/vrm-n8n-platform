@@ -66,7 +66,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         ];
       case 'wf-01':
         return [
-          { name: 'Cron 6h', type: 'Schedule', desc: '0 */6 * * *' },
+          { name: 'Cron 6h', type: 'Schedule', desc: 'Intervalo cada 6 horas' },
           { name: 'Get Window', type: 'Postgres', desc: 'Ventana desde última ejecución' },
           { name: 'Get Technologies', type: 'Postgres', desc: 'CPEs activos (cpe:2.3:a:...)' },
           { name: 'Query NVD 2.0 API', type: 'HTTP Request', desc: 'Paginación por startIndex, 2.000 CVE por página' },
@@ -75,7 +75,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         ];
       case 'wf-02':
         return [
-          { name: 'Cron 24h', type: 'Schedule', desc: 'Cada 24 horas desde la activación' },
+          { name: 'Cron 24h', type: 'Schedule', desc: 'Intervalo cada 24 horas' },
           { name: 'Get Domains', type: 'Postgres', desc: 'Dominios de proveedores' },
           { name: 'Query crt.sh API', type: 'HTTP Request', desc: 'Certificate Transparency logs' },
           { name: 'Filter Subdomains', type: 'Code JS', desc: 'Clasifica dev|staging|admin|vpn' },
@@ -84,7 +84,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         ];
       case 'wf-03':
         return [
-          { name: 'Cron 24h', type: 'Schedule', desc: 'Cada 24 horas desde la activación' },
+          { name: 'Cron 24h', type: 'Schedule', desc: 'Intervalo cada 24 horas' },
           { name: 'Get Active Endpoints', type: 'Postgres', desc: 'Hosts HTTPS de proveedores activos' },
           { name: 'TLS Certificate Probe', type: 'Code (tls)', desc: 'Inspecciona certificado X.509 y fecha de expiración; no evalúa cifrados débiles' },
           { name: 'Check Thresholds', type: 'IF Node', desc: '<60 días, <30 días, <7 días, vencido' },
@@ -92,7 +92,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         ];
       case 'wf-04':
         return [
-          { name: 'Cron 24h', type: 'Schedule', desc: 'Cada 24 horas desde la activación' },
+          { name: 'Cron 24h', type: 'Schedule', desc: 'Intervalo cada 24 horas' },
           { name: 'Resolve Hostnames', type: 'Code (dns)', desc: 'Resuelve IP pública y bloquea direcciones privadas o reservadas' },
           { name: 'Query Shodan Host API', type: 'HTTP Request', desc: 'Consulta puertos y banners' },
           { name: 'Flag Dangerous Ports', type: 'Code JS', desc: 'RDP 3389, SMB 445, Redis 6379...' },
@@ -100,7 +100,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         ];
       case 'wf-05':
         return [
-          { name: 'Cron 6h', type: 'Schedule', desc: '0 */6 * * *' },
+          { name: 'Cron 6h', type: 'Schedule', desc: 'Intervalo cada 6 horas' },
           { name: 'Find Due Vendors', type: 'Postgres', desc: 'Vencidos a 90/180/365 días' },
           { name: 'Create Assessment', type: 'Postgres', desc: 'Estado = reevaluation' },
           { name: 'Sign HMAC Portal Link', type: 'Code (crypto)', desc: 'HMAC-SHA256 con PORTAL_TOKEN_SECRET' },
@@ -116,13 +116,13 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         ];
       case 'wf-07':
         return [
-          { name: 'Cron 1h', type: 'Schedule', desc: 'Cada hora en punto' },
+          { name: 'Cron 1h', type: 'Schedule', desc: 'Intervalo cada hora' },
           { name: 'Get Active Vendors', type: 'Postgres', desc: 'Proveedores en monitoreo' },
           { name: 'Call Recalc API', type: 'HTTP Request', desc: 'POST /api/v1/scorecard/recalc/{id}; el backend registra score_history' }
         ];
       case 'wf-08':
         return [
-          { name: 'Cron 30m', type: 'Schedule', desc: 'Cada 30 minutos' },
+          { name: 'Cron 30m', type: 'Schedule', desc: 'Intervalo cada 30 minutos' },
           { name: 'Check Stalled Jobs', type: 'Postgres', desc: 'Jobs sin correr según umbral' },
           { name: 'Ping Backend /health', type: 'HTTP Request', desc: 'Verifica uptime del servidor' },
           { name: 'Deadman Alert', type: 'IF / Alert', desc: 'Dispara WF-06 si hay degradación' }
