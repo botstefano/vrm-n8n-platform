@@ -88,6 +88,16 @@ La rama incorpora workflows compatibles con n8n Cloud. Importa o actualiza los 1
 
 **Importante:** los JSON se exportan con `active: false`. No se ejecutan por el simple hecho de importarlos. Primero configura variables y credenciales, prueba los disparadores manuales y después activa los workflows que correspondan.
 
+### Vincular el gestor global de errores
+
+Después de importar y guardar **WF-00 Global Error Handler**, asígnalo como gestor de errores de cada workflow operativo:
+
+1. Abre **WF-01** y entra en el menú del workflow (esquina superior derecha) → **Settings**.
+2. En **Error Workflow**, selecciona **WF-00 Global Error Handler** y guarda.
+3. Repite el procedimiento para **WF-02** hasta **WF-10**.
+
+Este vínculo se configura en la instancia de n8n después de importar los JSON, porque el identificador interno de WF-00 lo genera n8n. WF-00 debe comenzar con el nodo **Error Trigger**, como ya está definido en el archivo del repositorio. n8n permite reutilizar el mismo workflow de errores para varios workflows; no necesitas crear diez gestores distintos.
+
 ### Credenciales que debes crear o seleccionar en n8n
 
 1. **Postgres VRM** — credencial PostgreSQL que apunte a la base Supabase. Usa los datos de Connect de Supabase. Si n8n Cloud no alcanza el host Direct, utiliza Session Pooler y el host/puerto proporcionados por Supabase.
