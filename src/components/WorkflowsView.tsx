@@ -181,18 +181,24 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => onExecuteWorkflow(selectedWfId)}
-            disabled={isExecuting}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white shadow-lg shadow-cyan-950 transition-all"
-          >
-            <Play className={`w-3.5 h-3.5 ${isExecuting && executingWfId === selectedWfId ? 'animate-spin' : ''}`} />
-            <span>
-              {isExecuting && executingWfId === selectedWfId
-                ? 'Ejecutando Pipeline...'
-                : `Ejecutar ${selectedWf.code}`}
+          {selectedWfId === 'wf-00' ? (
+            <span className="px-3 py-2 text-xs text-slate-400 rounded-lg border border-slate-700">
+              WF-00 se ejecuta automáticamente al producirse un error
             </span>
-          </button>
+          ) : (
+            <button
+              onClick={() => onExecuteWorkflow(selectedWfId)}
+              disabled={isExecuting}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white shadow-lg shadow-cyan-950 transition-all"
+            >
+              <Play className={`w-3.5 h-3.5 ${isExecuting && executingWfId === selectedWfId ? 'animate-spin' : ''}`} />
+              <span>
+                {isExecuting && executingWfId === selectedWfId
+                  ? 'Ejecutando Pipeline...'
+                  : `Ejecutar ${selectedWf.code}`}
+              </span>
+            </button>
+          )}
         </div>
       </div>
 
