@@ -113,7 +113,7 @@ async function writeAudit(req, action, entity, entityId, details = {}) {
 function verifyN8nSignature(req, res, next) {
   const expected = process.env.N8N_WEBHOOK_SECRET || '';
   const supplied = req.get('X-N8N-Signature') || '';
-  if (!expected) return res.status(503).json({ error: 'N8N_WEBHOOK_SECRET no está configurado en el backend.' });
+  if (!expected || expected.length < 32) return res.status(503).json({ error: 'N8N_WEBHOOK_SECRET debe estar configurado con al menos 32 caracteres aleatorios.' });
   const expectedBuffer = Buffer.from(expected);
   const suppliedBuffer = Buffer.from(supplied);
   if (!supplied || expectedBuffer.length !== suppliedBuffer.length ||
