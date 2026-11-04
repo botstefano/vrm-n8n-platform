@@ -23,13 +23,15 @@ interface AssessmentsViewProps {
   vendors: Vendor[];
   questionnaires: Questionnaire[];
   onSelectVendor: (vendorId: string) => void;
+  onExecuteWorkflow: (workflowId: string) => Promise<void>;
 }
 
 export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
   assessments,
   vendors,
   questionnaires,
-  onSelectVendor
+  onSelectVendor,
+  onExecuteWorkflow
 }) => {
   const [selectedAssessmentForPortal, setSelectedAssessmentForPortal] = useState<Assessment | null>(null);
   const [copiedPortalId, setCopiedPortalId] = useState<string | null>(null);
@@ -54,10 +56,9 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
 
   const handleTriggerReevaluations = async () => {
     try {
-      const result = await store.triggerReevaluationForDue();
-      alert(`Se crearon ${result.assessmentsCreated} evaluaciones en Supabase.`);
+      await onExecuteWorkflow('wf-05');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'No se pudieron crear las evaluaciones.');
+      alert(error instanceof Error ? error.message : 'No se pudo solicitar el workflow WF-05.');
     }
   };
 
