@@ -588,6 +588,11 @@
             "node": "Log Run",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -641,17 +646,6 @@
         [
           {
             "node": "Analyze Surface",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Log Run": {
-      "main": [
-        [
-          {
-            "node": "Build Manual Completion",
             "type": "main",
             "index": 0
           }
