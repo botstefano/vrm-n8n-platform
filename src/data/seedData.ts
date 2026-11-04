@@ -7,7 +7,7 @@ export const WORKFLOWS_REGISTRY: WorkflowSummary[] = [
     name: 'Global Error Handler',
     trigger: 'Error Trigger',
     scheduleDescription: 'On any workflow execution failure',
-    description: 'Captures runtime errors and node failures across all n8n workflows, registers dead-letters and relays failure alerts to WF-06 and the backend.',
+    description: 'Captures runtime errors and node failures across n8n workflows, writes a failure event to the backend audit log, and relays an alert through WF-06.',
     targetSources: ['system', 'error'],
     status: 'active'
   },
@@ -18,7 +18,7 @@ export const WORKFLOWS_REGISTRY: WorkflowSummary[] = [
     trigger: 'Cron (Every 6h)',
     scheduleDescription: 'Every 6 hours (0 */6 * * *)',
     jobType: 'nvd',
-    description: 'Queries NIST NVD API 2.0 for vendor technologies matched by CPE 2.3 expressions. Identifies new CVEs with CVSS >= NVD_MIN_CVSS and creates vendor findings.',
+    description: 'Queries NIST NVD API 2.0 for vendor technologies matched by CPE 2.3 expressions. Paginates CVE results and creates findings at or above NVD_MIN_CVSS.',
     targetSources: ['nvd'],
     status: 'active'
   },
@@ -36,11 +36,11 @@ export const WORKFLOWS_REGISTRY: WorkflowSummary[] = [
   {
     id: 'wf-03',
     code: 'WF-03',
-    name: 'TLS Expiry & Cipher Verifier',
+    name: 'TLS Certificate Expiry Monitor',
     trigger: 'Cron (Daily)',
     scheduleDescription: 'Every 24 hours (0 1 * * *)',
     jobType: 'tls_expiry',
-    description: 'Connects directly to vendor HTTPS endpoints using node tls module. Flags expiring certs (<60, <30, <7 days or expired) and weak ciphers with idempotent alerts.',
+    description: 'Connects to public vendor HTTPS endpoints using the native TLS module, inspects X.509 certificates, and creates findings for certificates expiring in under 60, 30, or 7 days, or already expired. It does not currently assess weak cipher suites.',
     targetSources: ['tls_expiry'],
     status: 'active'
   },
@@ -51,7 +51,7 @@ export const WORKFLOWS_REGISTRY: WorkflowSummary[] = [
     trigger: 'Cron (Daily)',
     scheduleDescription: 'Every 24 hours (0 2 * * *)',
     jobType: 'shodan',
-    description: 'Resolves vendor hostnames to IP ranges and inspects Shodan API. Flags dangerous exposed ports (RDP 3389, SMB 445, Redis 6379, MongoDB, Elasticsearch) and banner CVEs.',
+    description: 'Resolves vendor hostnames to public IP addresses and inspects the Shodan Host API. Flags dangerous exposed ports and CVEs associated with observed banners.',
     targetSources: ['shodan'],
     status: 'active'
   },
@@ -82,7 +82,7 @@ export const WORKFLOWS_REGISTRY: WorkflowSummary[] = [
     trigger: 'Cron (Hourly)',
     scheduleDescription: 'Every hour (0 * * * *)',
     jobType: 'scorecard_refresh_all',
-    description: 'Triggers backend recalculation for all active vendors based on open findings severity, questionnaire compliance, and criticality weighting. Updates score history.',
+    description: 'Triggers backend recalculation for active vendors using finding severity, vendor criticality, overdue reevaluation and pending assessments. Updates score history.',
     targetSources: ['scorecard'],
     status: 'active'
   },
@@ -102,9 +102,9 @@ export const WORKFLOWS_REGISTRY: WorkflowSummary[] = [
     code: 'WF-09',
     name: 'Weekly VRM Digest Generator',
     trigger: 'Cron (Mondays 08:00)',
-    scheduleDescription: 'Every Monday at 08:00 UTC (0 8 * * 1)',
+    scheduleDescription: 'Every Monday at 08:00 America/Lima (0 8 * * 1)',
     jobType: 'weekly_digest',
-    description: 'Compiles an executive summary of critical open findings, high-risk vendors, overdue assessments, and system metrics; emails security stakeholders in BCC.',
+    description: 'Compiles an executive summary of vendor risk distribution, open and overdue findings, recent findings, closures, and the ten highest-risk vendors; emails active VRM roles in BCC.',
     targetSources: ['digest'],
     status: 'active'
   },
@@ -113,9 +113,9 @@ export const WORKFLOWS_REGISTRY: WorkflowSummary[] = [
     code: 'WF-10',
     name: 'Cleanup & Compliance Archiver',
     trigger: 'Cron (Daily 03:00)',
-    scheduleDescription: 'Daily at 03:00 UTC (0 3 * * *)',
+    scheduleDescription: 'Daily at 03:00 America/Lima (0 3 * * *)',
     jobType: 'cleanup_archive',
-    description: 'Auto-closes findings older than STALE_FINDING_DAYS marked as auto_closed_stale, moves audit_log older than AUDIT_RETENTION_YEARS into audit_log_archive, and trims score history.',
+    description: 'Auto-closes open findings whose due date is older than STALE_FINDING_DAYS, archives audit_log rows older than AUDIT_RETENTION_YEARS, and purges score history older than SCORE_RETENTION_YEARS.',
     targetSources: ['cleanup'],
     status: 'active'
   }
