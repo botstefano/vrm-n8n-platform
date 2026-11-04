@@ -214,7 +214,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const PORTS = {\n  21: ['FTP', 'medium'], 23: ['Telnet', 'high'], 135: ['MS-RPC', 'high'], 139: ['NetBIOS', 'high'],\n  445: ['SMB', 'critical'], 1433: ['MS SQL', 'high'], 1521: ['Oracle DB', 'high'], 3306: ['MySQL', 'high'],\n  3389: ['RDP', 'critical'], 5432: ['PostgreSQL', 'high'], 5900: ['VNC', 'high'], 6379: ['Redis', 'critical'],\n  9200: ['Elasticsearch', 'high'], 11211: ['Memcached', 'high'], 27017: ['MongoDB', 'critical']\n};\nconst targets = $('Extract IP').all().map(i => i.json).filter(t => t.ip);\nconst out = [];\nlet failed = 0, scanned = 0, noData = 0;\nfor (const it of $input.all()) {\n  const r = it.json;\n  if (r.statusCode === 404) { noData++; continue; }          // Shodan sin datos para esa IP\n  if (r.statusCode !== 200 || !r.body) { failed++; continue; }\n  scanned++;\n  const h = r.body;\n  const matchingTargets = targets.filter(x => x.ip === h.ip_str);\n  if (!matchingTargets.length) continue;\n  const vulns = Array.isArray(h.vulns) ? h.vulns : Object.keys(h.vulns || {});\n  for (const t of matchingTargets) {\n    for (const p of (h.ports || [])) {\n      const d = PORTS[p];\n      if (!d) continue;\n      out.push({ json: { kind: 'finding', vendor_id: t.vendor_id, source: 'shodan',\n        source_ref: 'port:' + h.ip_str + ':' + p,\n        title: 'Puerto ' + p + ' (' + d[0] + ') expuesto en ' + t.host,\n        description: 'Shodan detecta ' + d[0] + ' accesible desde Internet en ' + h.ip_str + ':' + p + '.',\n        severity: d[1],\n        evidence: { host: t.host, ip: h.ip_str, port: p, service: d[0], org: h.org, last_update: h.last_update } } });\n    }\n    if (vulns.length) {\n      out.push({ json: { kind: 'finding', vendor_id: t.vendor_id, source: 'shodan', source_ref: 'cves:' + h.ip_str,\n        title: vulns.length + ' CVE(s) potenciales en ' + t.host + ' (' + h.ip_str + ')',\n        description: 'Shodan asocia estas CVEs a los banners: ' + vulns.slice(0, 20).join(', '),\n        severity: 'high',\n        evidence: { host: t.host, ip: h.ip_str, cves: vulns.slice(0, 20), total: vulns.length } } });\n    }\n  }\n}\nconst findings = out.length;\nout.push({ json: { kind: 'summary', job_type: 'shodan', interval_min: 1440,\n  status: failed === 0 ? 'ok' : (scanned === 0 ? 'error' : 'partial'),\n  meta: { scanned, failed, no_data: noData, findings } } });\nreturn out;"
+        "jsCode": "const PORTS = {\n  21: ['FTP', 'medium'], 23: ['Telnet', 'high'], 135: ['MS-RPC', 'high'], 139: ['NetBIOS', 'high'],\n  445: ['SMB', 'critical'], 1433: ['MS SQL', 'high'], 1521: ['Oracle DB', 'high'], 3306: ['MySQL', 'high'],\n  3389: ['RDP', 'critical'], 5432: ['PostgreSQL', 'high'], 5900: ['VNC', 'high'], 6379: ['Redis', 'critical'],\n  9200: ['Elasticsearch', 'high'], 11211: ['Memcached', 'high'], 27017: ['MongoDB', 'critical']\n};\nconst targets = $('Extract IP').all().map(i => i.json).filter(t => t.ip);\nconst out = [];\nlet failed = 0, scanned = 0, noData = 0, blocked = 0;\nfor (const it of $input.all()) {\n  const r = it.json;\n  if (r.skip === true) { blocked++; continue; }\n  if (r.statusCode === 404) { noData++; continue; }          // Shodan sin datos para esa IP\n  if (r.statusCode !== 200 || !r.body) { failed++; continue; }\n  scanned++;\n  const h = r.body;\n  const matchingTargets = targets.filter(x => x.ip === h.ip_str);\n  if (!matchingTargets.length) continue;\n  const vulns = Array.isArray(h.vulns) ? h.vulns : Object.keys(h.vulns || {});\n  for (const t of matchingTargets) {\n    for (const p of (h.ports || [])) {\n      const d = PORTS[p];\n      if (!d) continue;\n      out.push({ json: { kind: 'finding', vendor_id: t.vendor_id, source: 'shodan',\n        source_ref: 'port:' + h.ip_str + ':' + p,\n        title: 'Puerto ' + p + ' (' + d[0] + ') expuesto en ' + t.host,\n        description: 'Shodan detecta ' + d[0] + ' accesible desde Internet en ' + h.ip_str + ':' + p + '.',\n        severity: d[1],\n        evidence: { host: t.host, ip: h.ip_str, port: p, service: d[0], org: h.org, last_update: h.last_update } } });\n    }\n    if (vulns.length) {\n      out.push({ json: { kind: 'finding', vendor_id: t.vendor_id, source: 'shodan', source_ref: 'cves:' + h.ip_str,\n        title: vulns.length + ' CVE(s) potenciales en ' + t.host + ' (' + h.ip_str + ')',\n        description: 'Shodan asocia estas CVEs a los banners: ' + vulns.slice(0, 20).join(', '),\n        severity: 'high',\n        evidence: { host: t.host, ip: h.ip_str, cves: vulns.slice(0, 20), total: vulns.length } } });\n    }\n  }\n}\nconst findings = out.length;\nout.push({ json: { kind: 'summary', job_type: 'shodan', interval_min: 1440,\n  status: failed === 0 ? 'ok' : (scanned === 0 ? 'error' : 'partial'),\n  meta: { scanned, failed, no_data: noData, blocked, findings } } });\nreturn out;"
       },
       "id": "analyze",
       "name": "Analyze Surface",
@@ -586,6 +586,17 @@
         [
           {
             "node": "Get Vendors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip": {
+      "main": [
+        [
+          {
+            "node": "Analyze Surface",
             "type": "main",
             "index": 0
           }
