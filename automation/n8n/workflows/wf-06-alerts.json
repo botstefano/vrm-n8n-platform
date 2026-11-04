@@ -396,7 +396,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ { ok: false, deduped: false, error: 'SMTP delivery failed; alert was not marked as deduplicated.' } }}",
+        "responseBody": "={{ { ok: false, deduped: false, slackDelivered: true, emailDelivered: false, error: 'Email recipient lookup or SMTP delivery failed; alert was not marked as deduplicated.' } }}",
         "options": {
           "responseCode": 502
         }
@@ -465,19 +465,6 @@
       "position": [
         1940,
         1080
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "const alert = $('Normalize Alert').first().json || {};\nreturn [{ json: {\n  alert_id: alert.alert_id || null,\n  vendor_id: alert.vendor_id || null,\n  severity: alert.severity,\n  delivery_status: 'failed',\n  title: alert.title,\n  fingerprint: alert.fingerprint,\n  source: alert.source || null,\n  source_ref: alert.source_ref || null,\n  description: alert.description || null,\n  details: { route: alert.route, slack: 'failed', email: alert.route === 'slack+email' ? 'failed' : 'not_required' }\n} }];"
-      },
-      "id": "alert-callback-failed",
-      "name": "Build Alert Callback Failed",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1940,
-        1260
       ]
     },
     {
@@ -825,17 +812,6 @@
       ]
     },
     "Build Alert Callback Deduped": {
-      "main": [
-        [
-          {
-            "node": "Report Alert Delivery",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Alert Callback Failed": {
       "main": [
         [
           {
