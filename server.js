@@ -636,7 +636,9 @@ app.patch('/api/findings/:id', allowRoles('admin','risk_analyst'), async (req, r
   try {
     const allowed = ['status','severity','resolution','due_date'];
     const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => allowed.includes(key)));
-    if (updates.status === 'closed') updates.closed_at = new Date().toISOString();
+    if (Object.prototype.hasOwnProperty.call(updates, 'status')) {
+      updates.closed_at = updates.status === 'closed' ? new Date().toISOString() : null;
+    }
     const { data, error } = await supabase.from('vendor_findings').update(updates).eq('id', req.params.id).select().single();
     if (error) throw error;
     await writeAudit(req, 'update_finding_status', 'vendor_findings', data.id, updates);
