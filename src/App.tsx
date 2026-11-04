@@ -109,7 +109,7 @@ export function App() {
     store.hydrateFromApi()
       .then(() => {
         if (!active) return;
-        const matched = store.getUsers().find((user) => user.id === session.user.id) || null;
+        const matched = store.getUsers().find((user) => user.email?.toLowerCase() === session.user.email?.toLowerCase()) || null;
         setCurrentUser(matched);
         setActiveRole(matched?.roles?.[0] || 'sin rol');
       })
