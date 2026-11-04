@@ -18,6 +18,12 @@ alter table public.assessments
 create unique index if not exists uq_assessment_portal_token_hash
   on public.assessments(portal_token_hash) where portal_token_hash is not null;
 
+-- El esquema anterior creó audit_log_archive con LIKE sin índices;
+-- WF-10/Express necesitan una clave única para archivar mediante upsert.
+create unique index if not exists uq_audit_log_archive_id
+  on public.audit_log_archive(id);
+
+
 alter table public.vendor_technologies
   add column if not exists created_at timestamptz not null default now();
 
@@ -119,6 +125,32 @@ from auth.users au
 where au.email is not null
 on conflict (email) do update
   set full_name = coalesce(public.users.full_name, excluded.full_name);
+
+-- Completar definiciones vacías de cuestionarios estándar creados por el esquema anterior.
+update public.questionnaires
+set definition = '{
+  "sections": [
+    {
+      "id": "governance",
+      "title": "Gobernanza y Políticas de Seguridad",
+      "questions": [
+        {"id": "q1-1", "text": "¿Cuenta la organización con una certificación SOC 2 Tipo II o ISO 27001 vigente?", "weight": 25},
+        {"id": "q1-2", "text": "¿Se revisan las políticas de seguridad al menos anualmente?", "weight": 15}
+      ]
+    },
+    {
+      "id": "access",
+      "title": "Cifrado y Gestión de Accesos",
+      "questions": [
+        {"id": "q2-1", "text": "¿Se exige MFA en todos los accesos administrativos?", "weight": 25},
+        {"id": "q2-2", "text": "¿Los datos se cifran en tránsito y en reposo?", "weight": 20},
+        {"id": "q2-3", "text": "¿Existe rotación automatizada de credenciales y secretos de API?", "weight": 15}
+      ]
+    }
+  ]
+}'::jsonb
+where name = 'Cuestionario de seguridad estándar (ISO 27001 / SOC 2)'
+  and coalesce(definition, '{}'::jsonb) = '{}'::jsonb;
 
 -- Cuestionario estándar para el portal, si todavía no existe.
 insert into public.questionnaires (name, version, is_active, definition)
