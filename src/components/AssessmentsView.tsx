@@ -27,8 +27,9 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
   const [copiedPortalId, setCopiedPortalId] = useState<string | null>(null);
 
   const dueVendors = vendors.filter((v) => {
-    const active = ['approved', 'conditional', 'monitoring'].includes(v.status);
-    const isDue = !v.next_evaluation || new Date(v.next_evaluation) <= new Date();
+    const active = ['approved', 'conditional', 'monitoring', 'reevaluation'].includes(v.status);
+    const hasExpiredAssessment = assessments.some((assessment) => assessment.vendor_id === v.id && assessment.status === 'expired');
+    const isDue = v.status === 'reevaluation' && hasExpiredAssessment || !v.next_evaluation || new Date(v.next_evaluation) <= new Date();
     const hasPending = assessments.some(
       (a) => a.vendor_id === v.id && (a.status === 'pending' || a.status === 'in_progress')
     );
