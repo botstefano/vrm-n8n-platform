@@ -65,6 +65,21 @@ jobs:
               if (manual[0].parameters?.authentication !== 'headerAuth' || !manual[0].credentials?.httpHeaderAuth) {
                 throw new Error(`${file}: manual webhook must use Header Auth credentials`);
               }
+              const builders = nodes.filter((node) => node.name.startsWith('Build Manual Completion'));
+              const reporter = nodes.find((node) => node.name === 'Report Manual Completion');
+              if (builders.length === 0 || !reporter) {
+                throw new Error(`${file}: manual runs must report their final status to the backend`);
+              }
+              if (!String(reporter.parameters?.url || '').includes('/api/v1/webhooks/n8n/workflow-completed')) {
+                throw new Error(`${file}: completion callback URL is invalid`);
+              }
+              for (const builder of builders) {
+                const targets = Object.values(workflow.connections?.[builder.name] || {})
+                  .flat(2).map((connection) => connection.node);
+                if (!targets.includes('Report Manual Completion')) {
+                  throw new Error(`${file}: ${builder.name} is not connected to the completion callback`);
+                }
+              }
             }
 
             for (const node of nodes) {
