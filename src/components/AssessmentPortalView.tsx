@@ -61,7 +61,7 @@ export const AssessmentPortalView: React.FC<AssessmentPortalViewProps> = ({ toke
       );
       setScore(result.score);
       if (result.vendorStatusUpdated === false || result.scorecardUpdated === false) {
-        setCompletionWarning('Tus respuestas se guardaron correctamente, pero el sistema no pudo actualizar todos los datos internos. El equipo de gestión de proveedores ha sido informado.');
+        setCompletionWarning('Tus respuestas se guardaron correctamente, pero el sistema no pudo actualizar todos los datos internos. Contacta al equipo de gestión de proveedores para que revise el resultado.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo registrar la evaluación.');
