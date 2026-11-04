@@ -33,6 +33,8 @@ interface WorkflowsViewProps {
   onExecuteWorkflow: (wfId: string) => Promise<void>;
   isExecuting: boolean;
   executingWfId: string | null;
+  canWrite: boolean;
+  isAdmin: boolean;
 }
 
 export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
@@ -40,7 +42,9 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
   logs,
   onExecuteWorkflow,
   isExecuting,
-  executingWfId
+  executingWfId,
+  canWrite,
+  isAdmin
 }) => {
   const [selectedWfId, setSelectedWfId] = useState<string>('wf-01');
   const [activeTab, setActiveTab] = useState<'pipeline' | 'logs' | 'n8n_json'>('pipeline');
@@ -181,7 +185,11 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          {selectedWfId === 'wf-00' ? (
+          {!canWrite ? (
+            <span className="px-3 py-2 text-xs text-slate-400 rounded-lg border border-slate-700">Solo lectura</span>
+          ) : selectedWfId === 'wf-10' && !isAdmin ? (
+            <span className="px-3 py-2 text-xs text-slate-400 rounded-lg border border-slate-700">WF-10 reservado para administradores</span>
+          ) : selectedWfId === 'wf-00' ? (
             <span className="px-3 py-2 text-xs text-slate-400 rounded-lg border border-slate-700">
               WF-00 se ejecuta automáticamente al producirse un error
             </span>
