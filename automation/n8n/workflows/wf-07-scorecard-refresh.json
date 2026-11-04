@@ -298,13 +298,7 @@
             "node": "Log Run",
             "type": "main",
             "index": 0
-          }
-        ]
-      ]
-    },
-    "Log Run": {
-      "main": [
-        [
+          },
           {
             "node": "IF Failures",
             "type": "main",
