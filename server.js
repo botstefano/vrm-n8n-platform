@@ -770,7 +770,7 @@ app.post('/api/alerts', allowRoles('admin','risk_analyst'), async (req, res, nex
   catch (error) { next(error); }
 });
 
-app.post('/api/audit', allowRoles('admin','risk_analyst','auditor'), async (req, res, next) => {
+app.post('/api/audit', allowRoles('admin','risk_analyst'), async (req, res, next) => {
   try {
     const { action, entity, entity_id, details } = req.body || {};
     if (!action) return res.status(400).json({ error: 'action es obligatorio.' });
