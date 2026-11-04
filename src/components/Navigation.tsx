@@ -11,7 +11,6 @@ import {
   RefreshCw,
   Sparkles
 } from 'lucide-react';
-import { store } from '../services/store';
 
 export type NavTab =
   | 'dashboard'
@@ -29,7 +28,6 @@ interface NavigationProps {
   openCount: number;
   alertsCount: number;
   activeRole: string;
-  onSelectRole: (role: string) => void;
   onQuickRun: () => void;
   userEmail: string;
   onSignOut: () => void;
@@ -41,7 +39,6 @@ export const Navigation: React.FC<NavigationProps> = ({
   openCount,
   alertsCount,
   activeRole,
-  onSelectRole,
   onQuickRun,
   userEmail,
   onSignOut
