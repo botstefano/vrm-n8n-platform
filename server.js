@@ -298,10 +298,13 @@ async function dispatchAlertRecord(payload, reqUser = null) {
         headers: { 'content-type': 'application/json', 'X-Alert-Token': process.env.ALERTS_WEBHOOK_TOKEN },
         body: JSON.stringify({ ...payload, severity, fingerprint })
       });
-      await supabase.from('alert_notifications').update({
-        delivery_status: response.ok ? 'sent' : 'failed',
-        delivery_meta: { http_status: response.status }
+      const responseBody = await response.json().catch(() => ({}));
+      const deliveryStatus = !response.ok ? 'failed' : (responseBody.deduped ? 'deduped' : 'sent');
+      const { error: deliveryError } = await supabase.from('alert_notifications').update({
+        delivery_status: deliveryStatus,
+        delivery_meta: { http_status: response.status, response: responseBody }
       }).eq('id', data.id);
+      if (deliveryError) console.error('No se pudo actualizar el estado de la alerta:', deliveryError.message);
     } catch (error) {
       await supabase.from('alert_notifications').update({
         delivery_status: 'failed',
@@ -795,8 +798,12 @@ app.get('/{*splat}', (req, res, next) => {
 
 app.use((error, _req, res, _next) => {
   console.error(error);
-  const message = error?.message || 'Error interno del servidor.';
-  res.status(error?.status || 500).json({ error: message });
+  const status = Number(error?.status || 500);
+  const safeToExpose = status >= 400 && status < 500;
+  const message = safeToExpose
+    ? (error?.message || 'Solicitud no válida.')
+    : 'Error interno del servidor. Revisa los registros del servicio para obtener detalles.';
+  res.status(status >= 400 && status <= 599 ? status : 500).json({ error: message });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
