@@ -774,6 +774,7 @@ app.post('/api/workflows/:workflowCode/execute', allowRoles('admin','risk_analys
   const code = String(req.params.workflowCode).toLowerCase();
   if (code === 'wf-00') return res.status(409).json({ error: 'WF-00 es un manejador de errores basado en eventos y no admite ejecución manual.' });
   if (!/^wf-(0[1-9]|10)$/.test(code)) return res.status(400).json({ error: 'Código de workflow no válido.' });
+  if (code === 'wf-10' && !req.user.roles.includes('admin')) return res.status(403).json({ error: 'WF-10 está reservado para administradores.' });
   if (!process.env.N8N_MANUAL_WEBHOOK_BASE_URL || !process.env.ALERTS_WEBHOOK_TOKEN) {
     return res.status(503).json({ error: 'Configura N8N_MANUAL_WEBHOOK_BASE_URL y ALERTS_WEBHOOK_TOKEN en Render, e importa los workflows actualizados en n8n.' });
   }
