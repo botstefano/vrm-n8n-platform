@@ -18,9 +18,10 @@ interface HealthViewProps {
   jobs: MonitoringJob[];
   onExecuteWorkflow: (wfId: string) => Promise<void>;
   isExecuting: boolean;
+  canWrite: boolean;
 }
 
-export const HealthView: React.FC<HealthViewProps> = ({ jobs, onExecuteWorkflow, isExecuting }) => {
+export const HealthView: React.FC<HealthViewProps> = ({ jobs, onExecuteWorkflow, isExecuting, canWrite }) => {
   const [backendPing, setBackendPing] = useState<{ status: 'online' | 'offline' | 'checking'; latencyMs: number | null; database: 'connected' | 'unavailable' | 'unknown' }>({ status: 'checking', latencyMs: null, database: 'unknown' });
 
   const overdueJobs = jobs.filter(
@@ -58,14 +59,16 @@ export const HealthView: React.FC<HealthViewProps> = ({ jobs, onExecuteWorkflow,
           </p>
         </div>
 
-        <button
-          onClick={() => onExecuteWorkflow('wf-08')}
-          disabled={isExecuting}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white shadow-md shadow-cyan-950 transition-colors"
-        >
-          <Play className="w-3.5 h-3.5" />
-          <span>Ejecutar Health Check (WF-08)</span>
-        </button>
+        {canWrite && (
+          <button
+            onClick={() => onExecuteWorkflow('wf-08')}
+            disabled={isExecuting}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white shadow-md shadow-cyan-950 transition-colors"
+          >
+            <Play className="w-3.5 h-3.5" />
+            <span>Ejecutar Health Check (WF-08)</span>
+          </button>
+        )}
       </div>
 
       {/* Status Cards */}
