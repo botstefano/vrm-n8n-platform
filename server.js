@@ -93,6 +93,32 @@ async function authenticate(req, res, next) {
   }
 }
 
+function normalizeVendorWebsite(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const input = String(value).trim();
+  if (input.length > 2048) {
+    const error = new Error('La dirección web supera el máximo permitido de 2048 caracteres.');
+    error.status = 400;
+    throw error;
+  }
+  let url;
+  try {
+    url = new URL(/^https?:\/\//i.test(input) ? input : 'https://' + input);
+  } catch {
+    const error = new Error('La dirección web del proveedor no es una URL válida.');
+    error.status = 400;
+    throw error;
+  }
+  const isIp = crypto.isIP(url.hostname);
+  if (!['http:','https:'].includes(url.protocol) || !url.hostname ||
+      url.username || url.password || (!isIp && !url.hostname.includes('.'))) {
+    const error = new Error('La dirección web debe ser un dominio o IP con protocolo HTTP/HTTPS, sin credenciales.');
+    error.status = 400;
+    throw error;
+  }
+  return url.toString();
+}
+
 function allowRoles(...allowed) {
   return (req, res, next) => {
     if (req.user?.roles?.some((role) => allowed.includes(role))) return next();
@@ -606,7 +632,7 @@ app.post('/api/vendors', allowRoles('admin','risk_analyst'), async (req, res, ne
     const { data, error } = await supabase.from('vendors').insert({
       ...(body.id ? { id: body.id } : {}),
       legal_name: String(body.legal_name).trim(),
-      website: body.website || null,
+      website: normalizeVendorWebsite(body.website),
       status: body.status || 'onboarding',
       criticality: Math.min(5, Math.max(1, Number(body.criticality || 3))),
       current_risk: body.current_risk || 'low',
@@ -625,6 +651,7 @@ app.patch('/api/vendors/:id', allowRoles('admin','risk_analyst'), async (req, re
   try {
     const allowed = ['legal_name','website','status','criticality','next_evaluation','primary_contact'];
     const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => allowed.includes(key)));
+    if (Object.prototype.hasOwnProperty.call(updates, 'website')) updates.website = normalizeVendorWebsite(updates.website);
     const { data, error } = await supabase.from('vendors').update(updates).eq('id', req.params.id).select().single();
     if (error) throw error;
     if (['criticality','next_evaluation','status'].some((key) => Object.prototype.hasOwnProperty.call(updates, key))) {
