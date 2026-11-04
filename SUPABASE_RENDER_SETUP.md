@@ -75,6 +75,23 @@ Crea/configura en n8n:
 3. Configura las credenciales referenciadas por los nodos de NVD, Shodan, Redis y SMTP. Para WF-05, configura `SMTP VRM` y `SMTP_FROM`; el nodo de invitación solo envía correo cuando el proveedor tiene un email de contacto. El correo se envía después de que la API registre el hash del enlace firmado en Supabase.
 4. Configura en el entorno de n8n `N8N_WEBHOOK_SECRET`, `PORTAL_TOKEN_SECRET`, `VRM_PORTAL_URL`, `VRM_BACKEND_URL`, `N8N_BASE_URL`, `SMTP_FROM` y las demás variables que utilicen los workflows. `N8N_WEBHOOK_SECRET` debe coincidir con el valor de Render y n8n lo envía al backend en `X-N8N-Signature`. `PORTAL_TOKEN_SECRET` debe coincidir exactamente entre n8n y la API de Render y tener al menos 32 caracteres aleatorios. `VRM_PORTAL_URL` debe ser la URL pública del frontend terminada en `/portal`; `VRM_BACKEND_URL` es la URL base del Web Service Express. Como estos workflows utilizan variables y módulos nativos desde los Code nodes, en una instancia n8n autogestionada configura `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` y `NODE_FUNCTION_ALLOW_BUILTIN=crypto,tls,dns`, revisando antes las implicaciones de seguridad de permitir acceso a esas variables.
 
+Variables adicionales usadas por los workflows de n8n:
+
+| Variable | Uso |
+|---|---|
+| `SLACK_WEBHOOK_URL` | Incoming Webhook del canal de alertas |
+| `ALERT_FALLBACK_EMAIL` | Destinatario alternativo si no se encuentran usuarios RBAC |
+| `SMTP_FROM` | Dirección remitente usada por los nodos SMTP |
+| `NVD_MIN_CVSS` | Umbral CVSS (por defecto 7) |
+| `CT_LOOKBACK_DAYS` | Ventana de búsqueda de certificados (por defecto 3 días) |
+| `STALE_FINDING_DAYS` | Antigüedad para cierre de hallazgos obsoletos |
+| `AUDIT_RETENTION_YEARS` | Retención del log de auditoría |
+| `SCORE_RETENTION_YEARS` | Retención del histórico de puntuaciones |
+| `VRM_FRONTEND_URL` | Origen público del frontend, usado para enlaces en alertas |
+| `VRM_PORTAL_URL` | URL del frontend terminada en `/portal`, usada por WF-05 |
+
+`N8N_BLOCK_ENV_ACCESS_IN_NODE=false` y `NODE_FUNCTION_ALLOW_BUILTIN=crypto,tls,dns` son necesarios para que los Code nodes actuales puedan leer variables del entorno y cargar los módulos nativos usados por los workflows. Configúralos solo en una instancia n8n que administres y protege el acceso a su editor y a sus workflows.
+
 En Render:
 
 - `N8N_BASE_URL`: URL base de tu instancia n8n.
