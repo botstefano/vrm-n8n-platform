@@ -33,8 +33,41 @@ jobs:
           const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
           for (const file of fs.readdirSync(path).filter((name) => name.endsWith('.json'))) {
             const workflow = JSON.parse(fs.readFileSync(`${path}/${file}`, 'utf8'));
+            const code = file.match(/^(wf-\\d{2})-/)?.[1];
+            if (!code) throw new Error(`Unexpected workflow file name: ${file}`);
+            const nodes = workflow.nodes || [];
+            const nodeNames = new Set(nodes.map((node) => node.name));
             workflowCount += 1;
-            for (const node of workflow.nodes || []) {
+
+            for (const [source, outputs] of Object.entries(workflow.connections || {})) {
+              if (!nodeNames.has(source)) throw new Error(`${file}: connection source "${source}" does not exist`);
+              for (const branch of Object.values(outputs || {})) {
+                for (const group of branch || []) {
+                  for (const connection of group || []) {
+                    if (!nodeNames.has(connection.node)) {
+                      throw new Error(`${file}: connection target "${connection.node}" does not exist`);
+                    }
+                  }
+                }
+              }
+            }
+
+            if (code === 'wf-00') {
+              if (!nodes.some((node) => node.type === 'n8n-nodes-base.errorTrigger')) {
+                throw new Error(`${file}: WF-00 must retain its event-driven Error Trigger`);
+              }
+            } else {
+              const manual = nodes.filter((node) => node.name === 'Manual Trigger');
+              if (manual.length !== 1) throw new Error(`${file}: expected exactly one Manual Trigger`);
+              if (manual[0].parameters?.path !== `vrm-manual/${code}`) {
+                throw new Error(`${file}: manual webhook path does not match ${code}`);
+              }
+              if (manual[0].parameters?.authentication !== 'headerAuth' || !manual[0].credentials?.httpHeaderAuth) {
+                throw new Error(`${file}: manual webhook must use Header Auth credentials`);
+              }
+            }
+
+            for (const node of nodes) {
               if (node.type !== 'n8n-nodes-base.code') continue;
               try {
                 new AsyncFunction(node.parameters?.jsCode || '');
@@ -44,5 +77,6 @@ jobs:
               }
             }
           }
-          console.log(`Validated ${workflowCount} workflow JSON files and ${codeNodeCount} Code node scripts.`);
+          if (workflowCount !== 11) throw new Error(`Expected 11 workflows, found ${workflowCount}`);
+          console.log(`Validated ${workflowCount} workflows, their connections/manual triggers, and ${codeNodeCount} Code node scripts.`);
           NODE
