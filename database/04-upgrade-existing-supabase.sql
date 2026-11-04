@@ -86,7 +86,7 @@ for each row execute procedure public.set_updated_at();
 -- Normalizar correos de perfiles heredados sin romper user_roles.
 -- Si existen dos perfiles con la misma dirección solo diferenciada por mayúsculas,
 -- abortar para que un administrador los concilie explícitamente.
-do $
+do $vrm_email_check$
 begin
   if exists (
     select lower(email)
@@ -97,7 +97,7 @@ begin
     raise exception 'Hay perfiles duplicados por correo ignorando mayúsculas. Concilia public.users/user_roles antes de continuar.';
   end if;
 end;
-$;
+$vrm_email_check$;
 
 update public.users
 set email = lower(email)
