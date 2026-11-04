@@ -176,6 +176,27 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH expired AS (\n  UPDATE assessments\n     SET status = 'expired', portal_token_hash = NULL, token_expires_at = NULL\n   WHERE status IN ('pending','in_progress')\n     AND token_expires_at IS NOT NULL\n     AND token_expires_at <= now()\n  RETURNING id\n)\nSELECT COUNT(*)::int AS expired_assessments FROM expired;",
+        "options": {}
+      },
+      "id": "expire-assessments",
+      "name": "Expire Old Assessments",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        460,
+        120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "postgresVrm",
+          "name": "Postgres VRM"
+        }
+      }
     }
   ],
   "connections": {
@@ -183,7 +204,7 @@
       "main": [
         [
           {
-            "node": "Find Due Vendors",
+            "node": "Expire Old Assessments",
             "type": "main",
             "index": 0
           }
@@ -227,7 +248,7 @@
       "main": [
         [
           {
-            "node": "Find Due Vendors",
+            "node": "Expire Old Assessments",
             "type": "main",
             "index": 0
           }
@@ -250,6 +271,17 @@
         [
           {
             "node": "Send Invitation Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Expire Old Assessments": {
+      "main": [
+        [
+          {
+            "node": "Find Due Vendors",
             "type": "main",
             "index": 0
           }
