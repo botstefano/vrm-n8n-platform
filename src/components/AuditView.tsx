@@ -24,9 +24,10 @@ interface AuditViewProps {
   assessments: Assessment[];
   scoreHistory: ScoreHistoryEntry[];
   onExecuteWorkflow: (workflowId: string) => Promise<void>;
+  canCleanup: boolean;
 }
 
-export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive, vendors, technologies, findings, assessments, scoreHistory, onExecuteWorkflow }) => {
+export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive, vendors, technologies, findings, assessments, scoreHistory, onExecuteWorkflow, canCleanup }) => {
   const [activeTab, setActiveTab] = useState<'live' | 'archive'>('live');
   const [searchTerm, setSearchTerm] = useState('');
   const [cleanupRequested, setCleanupRequested] = useState(false);
@@ -93,13 +94,15 @@ export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive, ve
             <span>Exportar JSON</span>
           </button>
 
-          <button
-            onClick={handleRunCleanup}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-md shadow-cyan-950 transition-colors"
-          >
-            <Play className="w-3.5 h-3.5" />
-            <span>Ejecutar WF-10 Limpieza</span>
-          </button>
+          {canCleanup && (
+            <button
+              onClick={handleRunCleanup}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-md shadow-cyan-950 transition-colors"
+            >
+              <Play className="w-3.5 h-3.5" />
+              <span>Ejecutar WF-10 Limpieza</span>
+            </button>
+          )}
         </div>
       </div>
 
