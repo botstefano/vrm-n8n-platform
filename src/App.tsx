@@ -262,6 +262,7 @@ export function App() {
             selectedVendorId={selectedVendorId}
             onSelectVendor={setSelectedVendorId}
             onOpenFindingTab={() => setCurrentTab('findings')}
+            onRecalculateScorecard={(vendorId) => store.recalculateScorecard(vendorId)}
           />
         )}
         {currentTab === 'findings' && (
@@ -285,7 +286,12 @@ export function App() {
         {currentTab === 'health' && (
           <HealthView jobs={jobs} onExecuteWorkflow={handleExecuteWorkflow} isExecuting={isExecuting} />
         )}
-        {currentTab === 'audit' && <AuditView auditLog={auditLog} auditArchive={auditArchive} onExecuteWorkflow={handleExecuteWorkflow} />}
+        {currentTab === 'audit' && <AuditView
+          auditLog={auditLog} auditArchive={auditArchive}
+          vendors={vendors} technologies={technologies} findings={findings}
+          assessments={assessments} scoreHistory={scoreHistory}
+          onExecuteWorkflow={handleExecuteWorkflow}
+        />}
       </main>
 
       <footer className="border-t border-slate-900 bg-slate-950 py-4 mt-auto">
