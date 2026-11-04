@@ -291,6 +291,7 @@ async function dispatchAlertRecord(payload, reqUser = null) {
   };
   const { data, error } = await supabase.from('alert_notifications').insert(row).select().single();
   if (error) throw error;
+  let finalDeliveryStatus = row.delivery_status;
   if (!deduped && process.env.N8N_BASE_URL && process.env.ALERTS_WEBHOOK_TOKEN) {
     try {
       const response = await fetch(process.env.N8N_BASE_URL.replace(/\/$/, '') + '/webhook/vrm-alerts', {
@@ -299,20 +300,21 @@ async function dispatchAlertRecord(payload, reqUser = null) {
         body: JSON.stringify({ ...payload, severity, fingerprint })
       });
       const responseBody = await response.json().catch(() => ({}));
-      const deliveryStatus = !response.ok ? 'failed' : (responseBody.deduped ? 'deduped' : 'sent');
+      finalDeliveryStatus = !response.ok ? 'failed' : (responseBody.deduped ? 'deduped' : 'sent');
       const { error: deliveryError } = await supabase.from('alert_notifications').update({
-        delivery_status: deliveryStatus,
+        delivery_status: finalDeliveryStatus,
         delivery_meta: { http_status: response.status, response: responseBody }
       }).eq('id', data.id);
       if (deliveryError) console.error('No se pudo actualizar el estado de la alerta:', deliveryError.message);
     } catch (error) {
+      finalDeliveryStatus = 'failed';
       await supabase.from('alert_notifications').update({
         delivery_status: 'failed',
         delivery_meta: { error: String(error.message || error) }
       }).eq('id', data.id);
     }
   }
-  return { ...data, status: data.delivery_status, timestamp: data.created_at, vendor_name: null, email_subject: null, email_html: null, slack_text: null };
+  return { ...data, delivery_status: finalDeliveryStatus, status: finalDeliveryStatus, timestamp: data.created_at, vendor_name: null, email_subject: null, email_html: null, slack_text: null };
 }
 
 // Portal público de proveedores: acceso únicamente mediante enlace HMAC firmado, vigente y de un solo uso.
@@ -490,15 +492,15 @@ app.get('/api/bootstrap', async (req, res, next) => {
       'score_history','alert_notifications','workflow_execution_logs'
     ];
     const results = await Promise.all(tables.map(async (table) => {
-      const { data, error } = await supabase.from(table).select('*').order(
+      const orderColumn =
         table === 'vendors' ? 'created_at' :
         table === 'vendor_findings' ? 'detected_at' :
         table === 'audit_log' || table === 'audit_log_archive' ? 'created_at' :
         table === 'score_history' ? 'calculated_at' :
         table === 'alert_notifications' ? 'created_at' :
-        table === 'workflow_execution_logs' ? 'started_at' : 'id',
-        { ascending: false }
-      );
+        table === 'workflow_execution_logs' ? 'started_at' :
+        table === 'user_roles' ? 'user_id' : 'id';
+      const { data, error } = await supabase.from(table).select('*').order(orderColumn, { ascending: false });
       if (error) throw error;
       return [table, data || []];
     }));
@@ -703,9 +705,10 @@ app.post('/api/assessments/:id/complete', allowRoles('admin','risk_analyst'), as
     const score = Math.max(0, Math.min(100, Number(req.body?.score ?? 0)));
     const { data, error } = await supabase.from('assessments').update({
       status: 'completed', completed_at: new Date().toISOString(), submitted_at: new Date().toISOString(),
-      score, responses: req.body?.responses || {}
-    }).eq('id', req.params.id).select().single();
+      score, responses: req.body?.responses || {}, portal_token_hash: null, token_expires_at: null
+    }).eq('id', req.params.id).in('status', ['pending','in_progress']).select().maybeSingle();
     if (error) throw error;
+    if (!data) return res.status(409).json({ error: 'La evaluación ya fue completada o no admite más respuestas.' });
     const nextVendorStatus = score >= 75 ? 'approved' : 'conditional';
     await supabase.from('vendors').update({ status: nextVendorStatus }).eq('id', data.vendor_id).eq('status', 'reevaluation');
     await writeAudit(req, 'complete_assessment', 'assessments', data.id, { score });
@@ -754,8 +757,9 @@ app.post('/api/cleanup', allowRoles('admin'), async (req, res, next) => {
       const { error: deleteError } = await supabase.from('audit_log').delete().lt('created_at', cutoff);
       if (deleteError) throw deleteError;
     }
+    const scoreRetentionYears = Math.max(1, Number(process.env.SCORE_RETENTION_YEARS || 2));
     const { data: oldScores, error: scoreError } = await supabase.from('score_history').delete()
-      .lt('calculated_at', new Date(Date.now() - 365 * 86400000).toISOString()).select('id');
+      .lt('calculated_at', new Date(Date.now() - scoreRetentionYears * 365 * 86400000).toISOString()).select('id');
     if (scoreError) throw scoreError;
     await writeAudit(req, 'run_cleanup', 'system', 'wf-10', {
       closed_findings: closed?.length || 0, archived_audit: oldAudit?.length || 0, purged_scores: oldScores?.length || 0
