@@ -2,21 +2,12 @@ import React, { useState } from 'react';
 import {
   FileCheck2,
   Calendar,
-  KeyRound,
   ExternalLink,
-  CheckCircle2,
-  Clock,
   Play,
-  ShieldCheck,
-  Send,
-  X,
   Copy,
-  Check,
-  Building2,
-  HelpCircle
+  Check
 } from 'lucide-react';
 import { Assessment, Vendor, Questionnaire } from '../types';
-import { store } from '../services/store';
 
 interface AssessmentsViewProps {
   assessments: Assessment[];
@@ -33,17 +24,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
   onSelectVendor,
   onExecuteWorkflow
 }) => {
-  const [selectedAssessmentForPortal, setSelectedAssessmentForPortal] = useState<Assessment | null>(null);
   const [copiedPortalId, setCopiedPortalId] = useState<string | null>(null);
-
-  // Internal assessment response form
-  const [qAnswers, setQAnswers] = useState<Record<string, boolean>>({
-    'q1-1': true,
-    'q1-2': true,
-    'q2-1': true,
-    'q2-2': true,
-    'q2-3': false
-  });
 
   const dueVendors = vendors.filter((v) => {
     const active = ['approved', 'conditional', 'monitoring'].includes(v.status);
@@ -70,26 +51,6 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
       window.setTimeout(() => setCopiedPortalId(null), 2000);
     } catch {
       alert('No se pudo copiar el enlace. Ábrelo y copia la URL desde el navegador.');
-    }
-  };
-
-  const handlePortalSubmit = async () => {
-    if (!selectedAssessmentForPortal) return;
-    // Calculate the weighted assessment score from the vendor's submitted answers
-    let totalScore = 0;
-    const q1 = qAnswers['q1-1'] ? 25 : 0;
-    const q2 = qAnswers['q1-2'] ? 15 : 0;
-    const q3 = qAnswers['q2-1'] ? 25 : 0;
-    const q4 = qAnswers['q2-2'] ? 20 : 0;
-    const q5 = qAnswers['q2-3'] ? 15 : 0;
-    totalScore = q1 + q2 + q3 + q4 + q5;
-
-    try {
-      await store.completeAssessment(selectedAssessmentForPortal.id, totalScore, qAnswers);
-      alert(`Evaluación guardada en Supabase. Calificación: ${totalScore}/100.`);
-      setSelectedAssessmentForPortal(null);
-    } catch (error) {
-      alert(error instanceof Error ? error.message : 'No se pudo guardar la evaluación.');
     }
   };
 
@@ -261,126 +222,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
         </div>
       </div>
 
-      {/* Internal assessment response modal */}
-      {selectedAssessmentForPortal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-          <div className="bg-slate-900 border border-cyan-700/80 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl overflow-y-auto max-h-[90vh]">
-            <div className="flex items-start justify-between pb-3 border-b border-slate-800">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 rounded text-[10px] uppercase font-mono font-bold bg-cyan-950 text-cyan-400 border border-cyan-800">
-                    Evaluación interna
-                  </span>
-                  <h3 className="text-base font-bold text-white">Cuestionario de Cumplimiento de Seguridad</h3>
-                </div>
-                <p className="text-xs text-slate-400 mt-1">
-                  Formulario de respuesta para guardar la evaluación en la base de datos:
-                </p>
-                <div className="font-mono text-[10px] text-cyan-300/80 bg-slate-950 p-1.5 rounded mt-1 truncate">
-                  {selectedAssessmentForPortal.id}
-                </div>
-              </div>
 
-              <button
-                onClick={() => setSelectedAssessmentForPortal(null)}
-                className="text-slate-400 hover:text-slate-200"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Questions Form */}
-            <div className="space-y-4 text-xs">
-              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-                <div className="font-bold text-slate-200 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                  <ShieldCheck className="w-4 h-4 text-cyan-400" />
-                  1. Certificaciones & Gobernanza
-                </div>
-
-                <label className="flex items-start gap-2.5 cursor-pointer text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={qAnswers['q1-1']}
-                    onChange={(e) => setQAnswers({ ...qAnswers, 'q1-1': e.target.checked })}
-                    className="mt-0.5 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0"
-                  />
-                  <span>¿Cuenta la organización con una certificación SOC 2 Tipo II o ISO 27001 vigente? (+25 pts)</span>
-                </label>
-
-                <label className="flex items-start gap-2.5 cursor-pointer text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={qAnswers['q1-2']}
-                    onChange={(e) => setQAnswers({ ...qAnswers, 'q1-2': e.target.checked })}
-                    className="mt-0.5 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0"
-                  />
-                  <span>¿Se realizan revisiones periódicas de políticas de seguridad al menos anualmente? (+15 pts)</span>
-                </label>
-              </div>
-
-              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
-                <div className="font-bold text-slate-200 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                  <KeyRound className="w-4 h-4 text-amber-400" />
-                  2. Cifrado y Control de Accesos
-                </div>
-
-                <label className="flex items-start gap-2.5 cursor-pointer text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={qAnswers['q2-1']}
-                    onChange={(e) => setQAnswers({ ...qAnswers, 'q2-1': e.target.checked })}
-                    className="mt-0.5 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0"
-                  />
-                  <span>¿Se exige Autenticación Multifactor (MFA) obligatoria en todos los accesos administrativos? (+25 pts)</span>
-                </label>
-
-                <label className="flex items-start gap-2.5 cursor-pointer text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={qAnswers['q2-2']}
-                    onChange={(e) => setQAnswers({ ...qAnswers, 'q2-2': e.target.checked })}
-                    className="mt-0.5 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0"
-                  />
-                  <span>¿Los datos en tránsito están cifrados con TLS 1.2+ y en reposo con AES-256? (+20 pts)</span>
-                </label>
-
-                <label className="flex items-start gap-2.5 cursor-pointer text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={qAnswers['q2-3']}
-                    onChange={(e) => setQAnswers({ ...qAnswers, 'q2-3': e.target.checked })}
-                    className="mt-0.5 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-0"
-                  />
-                  <span>¿Existe rotación de credenciales y secretos de API automatizada? (+15 pts)</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
-              <span className="text-xs text-slate-400">
-                Al enviar, las respuestas y la puntuación se guardarán en Supabase.
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedAssessmentForPortal(null)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs"
-                >
-                  Cerrar
-                </button>
-                <button
-                  type="button"
-                  onClick={handlePortalSubmit}
-                  className="px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs flex items-center gap-1.5"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Enviar Cuestionario</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
