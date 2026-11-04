@@ -278,6 +278,7 @@ export function App() {
         {currentTab === 'assessments' && (
           <AssessmentsView assessments={assessments} vendors={vendors} questionnaires={questionnaires}
             onSelectVendor={(vendorId) => { setSelectedVendorId(vendorId); setCurrentTab('vendors'); }}
+            onExecuteWorkflow={handleExecuteWorkflow}
           />
         )}
         {currentTab === 'alerts' && <AlertsView alerts={alerts} vendors={vendors} />}
