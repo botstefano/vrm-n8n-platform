@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import crypto from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
@@ -10,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
-const FRONTEND_ORIGIN = process.env.VRM_FRONTEND_URL;
+const FRONTEND_ORIGINS = (process.env.VRM_FRONTEND_URL || '').split(',').map((value) => value.trim()).filter(Boolean);
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 
@@ -24,7 +23,7 @@ app.disable('x-powered-by');
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || !FRONTEND_ORIGIN || origin === FRONTEND_ORIGIN) return callback(null, true);
+    if (!origin || FRONTEND_ORIGINS.includes(origin) || /^https?:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$/.test(origin)) return callback(null, true);
     return callback(new Error('Origen no permitido por CORS'));
   },
   credentials: true
@@ -82,12 +81,6 @@ function allowRoles(...allowed) {
     if (req.user?.roles?.some((role) => allowed.includes(role))) return next();
     return res.status(403).json({ error: 'No tienes permisos para realizar esta operación.' });
   };
-}
-
-async function query(table, configure = (q) => q) {
-  const { data, error } = await configure(supabase.from(table)).select ? await configure(supabase.from(table)) : { data: null, error: null };
-  if (error) throw error;
-  return data || [];
 }
 
 async function writeAudit(req, action, entity, entityId, details = {}) {
@@ -190,6 +183,26 @@ app.use('/api', requireDatabase, authenticate);
 
 app.get('/api/bootstrap', async (req, res, next) => {
   try {
+    const { data: activeQuestionnaires, error: questionnaireError } = await supabase
+      .from('questionnaires').select('id').eq('is_active', true).limit(1);
+    if (questionnaireError) throw questionnaireError;
+    if (!activeQuestionnaires?.length) {
+      const definition = { sections: [
+        { id: 'governance', title: 'Gobernanza y Políticas de Seguridad', questions: [
+          { id: 'q1-1', text: '¿Cuenta la organización con una certificación SOC 2 Tipo II o ISO 27001 vigente?', weight: 25 },
+          { id: 'q1-2', text: '¿Se revisan las políticas de seguridad al menos anualmente?', weight: 15 }
+        ]},
+        { id: 'access', title: 'Cifrado y Gestión de Accesos', questions: [
+          { id: 'q2-1', text: '¿Se exige MFA en todos los accesos administrativos?', weight: 25 },
+          { id: 'q2-2', text: '¿Los datos se cifran en tránsito y en reposo?', weight: 20 },
+          { id: 'q2-3', text: '¿Existe rotación automatizada de credenciales y secretos de API?', weight: 15 }
+        ]}
+      ]};
+      const { error } = await supabase.from('questionnaires').insert({
+        name: 'Cuestionario de seguridad estándar (ISO 27001 / SOC 2)', version: 1, is_active: true, definition
+      });
+      if (error) throw error;
+    }
     const tables = [
       'vendors','vendor_technologies','questionnaires','assessments','vendor_findings',
       'monitoring_jobs','users','roles','user_roles','audit_log','audit_log_archive',
@@ -215,7 +228,6 @@ app.get('/api/bootstrap', async (req, res, next) => {
       if (!role) continue;
       roleMap.set(membership.user_id, [...(roleMap.get(membership.user_id) || []), role.code]);
     }
-    const user = rows.users.find((item) => item.id === req.user.id);
     const payload = {
       user: { ...req.user, roles: roleMap.get(req.user.id) || req.user.roles },
       vendors: rows.vendors,
@@ -247,6 +259,7 @@ app.post('/api/vendors', allowRoles('admin','risk_analyst'), async (req, res, ne
     const body = req.body || {};
     if (!String(body.legal_name || '').trim()) return res.status(400).json({ error: 'legal_name es obligatorio.' });
     const { data, error } = await supabase.from('vendors').insert({
+      ...(body.id ? { id: body.id } : {}),
       legal_name: String(body.legal_name).trim(),
       website: body.website || null,
       status: body.status || 'onboarding',
@@ -287,7 +300,7 @@ app.post('/api/technologies', allowRoles('admin','risk_analyst'), async (req, re
     const { vendor_id, product_name, cpe_match, is_active = true } = req.body || {};
     if (!vendor_id || !cpe_match) return res.status(400).json({ error: 'vendor_id y cpe_match son obligatorios.' });
     const { data, error } = await supabase.from('vendor_technologies')
-      .insert({ vendor_id, product_name: product_name || null, cpe_match, is_active }).select().single();
+      .insert({ ...(req.body?.id ? { id: req.body.id } : {}), vendor_id, product_name: product_name || null, cpe_match, is_active }).select().single();
     if (error) throw error;
     await writeAudit(req, 'insert_technology', 'vendor_technologies', data.id, { product_name, cpe_match });
     res.status(201).json(data);
@@ -310,6 +323,7 @@ app.post('/api/findings', allowRoles('admin','risk_analyst'), async (req, res, n
       return res.status(400).json({ error: 'vendor_id, source, source_ref, title y severity son obligatorios.' });
     }
     const { data, error } = await supabase.from('vendor_findings').insert({
+      ...(body.id ? { id: body.id } : {}),
       vendor_id: body.vendor_id, source: body.source, source_ref: body.source_ref,
       title: body.title, description: body.description || null, severity: body.severity,
       status: body.status || 'open', evidence: body.evidence || {}, due_date: body.due_date || null
@@ -317,9 +331,7 @@ app.post('/api/findings', allowRoles('admin','risk_analyst'), async (req, res, n
     if (error?.code === '23505') return res.status(409).json({ error: 'El hallazgo ya existe para ese proveedor, fuente y referencia.' });
     if (error) throw error;
     await writeAudit(req, 'insert_finding', 'vendor_findings', data.id, { title: data.title, severity: data.severity });
-    if (['critical','high'].includes(data.severity)) {
-      await dispatchAlertRecord({ severity: data.severity, title: data.title, vendor_id: data.vendor_id, source: data.source, source_ref: data.source_ref, description: data.description }, req.user);
-    }
+    await recalculateVendorScore(data.vendor_id);
     res.status(201).json(data);
   } catch (error) { next(error); }
 });
@@ -400,7 +412,11 @@ app.post('/api/assessments/:id/complete', allowRoles('admin','risk_analyst'), as
 });
 
 app.post('/api/alerts', allowRoles('admin','risk_analyst'), async (req, res, next) => {
-  try { res.status(201).json(await dispatchAlertRecord(req.body || {}, req.user)); }
+  try {
+    const alert = await dispatchAlertRecord(req.body || {}, req.user);
+    await writeAudit(req, 'dispatch_alert', 'alert_notifications', alert.id, { severity: alert.severity, route: alert.route });
+    res.status(201).json(alert);
+  }
   catch (error) { next(error); }
 });
 
@@ -460,7 +476,7 @@ app.post('/api/workflows/:workflowCode/execute', allowRoles('admin','risk_analys
 
 // Static frontend support is useful when this repository is deployed as a single Web Service.
 app.use(express.static(path.join(__dirname, 'dist')));
-app.get('*', (req, res, next) => {
+app.get('/{*splat}', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
