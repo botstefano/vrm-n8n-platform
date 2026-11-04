@@ -183,6 +183,10 @@ jobs:
           if (!failedCallback.includes('if (auditError) throw auditError;')) {
             throw new Error('n8n failure callback must return an error when its audit event cannot be persisted');
           }
+          if (!server.includes('signal: AbortSignal.timeout(15000)') ||
+              !server.includes('signal: AbortSignal.timeout(30000)')) {
+            throw new Error('n8n webhook requests must have bounded response timeouts');
+          }
 
           console.log(`Validated ${workflowCount} workflows, their connections/manual triggers, ${codeNodeCount} Code node scripts, and critical API/workflow contracts.`);
           NODE
