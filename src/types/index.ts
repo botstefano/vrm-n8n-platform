@@ -70,6 +70,7 @@ export interface Assessment {
   completed_at: string | null;
   score?: number | null;
   portal_token?: string;
+  portal_link?: string | null;
 }
 
 export interface VendorFinding {
