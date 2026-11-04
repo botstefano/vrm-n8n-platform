@@ -30,9 +30,10 @@ import { apiRequest } from './api';
 function createId(): string { return crypto.randomUUID(); }
 
 function escapeHtml(value: unknown): string {
-  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+  const entities: Record<string, string> = {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[character] as string));
+  };
+  return String(value ?? '').replace(/[&<>"']/g, (character) => entities[character]);
 }
 
 
