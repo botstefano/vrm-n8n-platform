@@ -32,7 +32,6 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
   onSelectVendor
 }) => {
   const [selectedAssessmentForPortal, setSelectedAssessmentForPortal] = useState<Assessment | null>(null);
-  const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
   // Portal form answers simulator
   const [qAnswers, setQAnswers] = useState<Record<string, boolean>>({
@@ -61,17 +60,9 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
     }
   };
 
-  const handleCopyLink = (token?: string) => {
-    if (!token) return;
-    const url = `${window.location.origin}/portal/assessment/${token}`;
-    navigator.clipboard.writeText(url);
-    setCopiedToken(token);
-    setTimeout(() => setCopiedToken(null), 2000);
-  };
-
   const handlePortalSubmit = async () => {
     if (!selectedAssessmentForPortal) return;
-    // Calculate simulated score from answers
+    // Calculate the weighted assessment score from the vendor's submitted answers
     let totalScore = 0;
     const q1 = qAnswers['q1-1'] ? 25 : 0;
     const q2 = qAnswers['q1-2'] ? 15 : 0;
@@ -96,7 +87,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <FileCheck2 className="w-5 h-5 text-cyan-400" />
-            Evaluaciones de Seguridad & Portal de Proveedores (WF-05)
+            Evaluaciones de Seguridad de Proveedores (WF-05)
           </h2>
           <p className="text-xs text-slate-400">
             Reevaluaciones persistidas en Supabase según criticidad del proveedor
@@ -131,7 +122,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
             onClick={handleTriggerReevaluations}
             className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs"
           >
-            Generar Enlaces Firmados
+            Crear reevaluaciones
           </button>
         </div>
       )}
