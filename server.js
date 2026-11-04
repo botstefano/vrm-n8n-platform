@@ -332,7 +332,8 @@ async function scanVendorTls(vendor) {
   try {
     const website = String(vendor.website);
     const url = new URL(website.startsWith('http://') || website.startsWith('https://') ? website : 'https://' + website);
-    host = url.hostname.replace(/^\\[|\\]$/g, '').toLowerCase();
+    host = url.hostname.toLowerCase();
+    if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
     port = Number(url.port) || 443;
   } catch {
     return { ...result, error: 'invalid_website' };

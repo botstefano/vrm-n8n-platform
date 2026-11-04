@@ -85,10 +85,6 @@
         300
       ],
       "credentials": {
-        "httpQueryAuth": {
-          "id": "httpQueryShodan",
-          "name": "Shodan API"
-        },
         "httpHeaderAuth": {
           "id": "vrmBackendCallbackAuth",
           "name": "VRM Backend Callback Auth"
