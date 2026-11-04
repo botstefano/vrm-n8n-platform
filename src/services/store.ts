@@ -85,10 +85,13 @@ class VrmStore {
   }
 
   private remote<T>(request: Promise<T>): void {
-    void request.catch((error) => {
+    void request.then(() => this.hydrateFromApi()).catch(async (error) => {
       const message = error instanceof Error ? error.message : 'Error al sincronizar con Supabase.';
       console.error(message);
       if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('vrm-api-error', { detail: message }));
+      // Restore the authoritative server state after a failed optimistic mutation.
+      try { await this.hydrateFromApi(); }
+      catch (refreshError) { console.error('No se pudo restaurar el estado del servidor:', refreshError); }
     });
   }
 
@@ -149,7 +152,6 @@ class VrmStore {
       updated_at: new Date().toISOString()
     };
     this.vendors.unshift(newVendor);
-    this.logAudit('admin@vrm.local', 'insert_vendor', 'vendors', id, { legal_name: newVendor.legal_name });
     this.remote(apiRequest('/api/vendors', { method: 'POST', body: newVendor }));
     this.notify();
     return newVendor;
@@ -257,7 +259,6 @@ class VrmStore {
   public updateFindingStatus(id: string, status: FindingStatus, resolution?: string): void {
     const f = this.findings.find((item) => item.id === id);
     if (f) {
-      const prev = f.status;
       f.status = status;
       if (resolution) f.resolution = resolution;
       if (status === 'closed') {
@@ -305,13 +306,7 @@ class VrmStore {
       ':'
     );
 
-    // Redis dedupe simulation (1-hour window)
-    const oneHourAgo = Date.now() - 3600000;
-    const recentDuplicate = this.alerts.find(
-      (a) => a.fingerprint === fingerprint && new Date(a.timestamp).getTime() > oneHourAgo
-    );
 
-    const isDeduped = !!recentDuplicate;
 
     const slack_text =
       `🚨 *[${s.toUpperCase()}]* ${params.title}\n` +
@@ -344,7 +339,7 @@ class VrmStore {
       source: params.source,
       source_ref: params.source_ref,
       description: params.description,
-      status: isDeduped ? 'deduped' : 'pending',
+      status: 'pending',
       slack_text,
       email_subject,
       email_html
@@ -359,12 +354,6 @@ class VrmStore {
       }
       return saved;
     }));
-    this.logAudit('n8n:wf-06-alerts', 'dispatch_alert', 'alerts', alertItem.id, {
-      route,
-      severity: s,
-      status: alertItem.status,
-      title: params.title
-    });
     this.notify();
     return alertItem;
   }
