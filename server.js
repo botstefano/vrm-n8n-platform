@@ -985,7 +985,18 @@ app.post('/api/workflows/:workflowCode/execute', allowRoles('admin','risk_analys
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'X-Alert-Token': process.env.ALERTS_WEBHOOK_TOKEN },
-      body: JSON.stringify({ requested_by: req.user.email, workflow_code: code, request_id: requestId })
+      body: JSON.stringify({
+        requested_by: req.user.email,
+        workflow_code: code,
+        request_id: requestId,
+        ...(code === 'wf-06' ? {
+          severity: 'info',
+          title: 'Prueba manual del canal de notificaciones WF-06',
+          source: 'manual_trigger',
+          source_ref: requestId,
+          description: 'Mensaje de prueba generado por la ejecución manual del workflow de alertas.'
+        } : {})
+      })
     });
     const responseText = await response.text();
     if (!response.ok) {
