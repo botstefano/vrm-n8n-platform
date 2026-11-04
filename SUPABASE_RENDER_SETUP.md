@@ -130,7 +130,7 @@ No crees en n8n Variables `N8N_WEBHOOK_SECRET`, `ALERTS_WEBHOOK_TOKEN`, `PORTAL_
 - **WF-06 Alertas:** Slack se envía mediante `POST /api/v1/webhooks/n8n/slack-delivery`; la URL secreta del Incoming Webhook permanece en Render. El correo sigue usando `SMTP VRM`.
 - **WF-00 y WF-01 a WF-04, WF-07 y WF-08:** solicitan el despacho de alertas mediante `POST /api/v1/webhooks/n8n/alert-request`. La API registra y deduplica la notificación y luego invoca WF-06.
 
-El backend mantiene `N8N_BASE_URL`, `ALERTS_WEBHOOK_TOKEN`, `N8N_WEBHOOK_SECRET` y `SLACK_WEBHOOK_URL) como variables privadas de Render. La clave HMAC del portal `PORTAL_TOKEN_SECRET` también permanece solo en Render. No se requiere habilitar acceso a variables de entorno ni módulos Node.js en Code nodes de n8n Cloud.
+El backend mantiene `N8N_BASE_URL`, `ALERTS_WEBHOOK_TOKEN`, `N8N_WEBHOOK_SECRET` y `SLACK_WEBHOOK_URL` como variables privadas de Render. La clave HMAC del portal `PORTAL_TOKEN_SECRET` también permanece solo en Render. No se requiere habilitar acceso a variables de entorno ni módulos Node.js en Code nodes de n8n Cloud.
 
 WF-01 mantiene paginación NVD de hasta 2.000 resultados por página, máximo 50 páginas por tecnología e intervalo de 6 segundos entre peticiones. Si el límite no permite recuperar todos los resultados, el job debe quedar como `partial`.
 
