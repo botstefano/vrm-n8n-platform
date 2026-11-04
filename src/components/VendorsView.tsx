@@ -39,6 +39,7 @@ interface VendorsViewProps {
   selectedVendorId: string | null;
   onSelectVendor: (id: string | null) => void;
   onOpenFindingTab: () => void;
+  onRecalculateScorecard: (vendorId: string) => Promise<{ score: number; risk: string }>;
 }
 
 export const VendorsView: React.FC<VendorsViewProps> = ({
@@ -49,7 +50,8 @@ export const VendorsView: React.FC<VendorsViewProps> = ({
   scoreHistory,
   selectedVendorId,
   onSelectVendor,
-  onOpenFindingTab
+  onOpenFindingTab,
+  onRecalculateScorecard
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -351,9 +353,13 @@ export const VendorsView: React.FC<VendorsViewProps> = ({
 
             <div className="flex items-center gap-2">
               <button
-                onClick={() => {
-                  const res = store.recalculateScorecard(selectedVendor.id);
-                  alert(`Scorecard recalculado (WF-07): ${res.score} puntos · Nivel de Riesgo: ${res.risk.toUpperCase()}`);
+                onClick={async () => {
+                  try {
+                    const result = await onRecalculateScorecard(selectedVendor.id);
+                    alert(`Scorecard recalculado: ${result.score} puntos · Nivel de Riesgo: ${result.risk.toUpperCase()}`);
+                  } catch (error) {
+                    alert(error instanceof Error ? error.message : 'No se pudo recalcular el scorecard.');
+                  }
                 }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 transition-colors"
               >
