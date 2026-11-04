@@ -111,8 +111,7 @@
       ],
       "retryOnFail": true,
       "maxTries": 3,
-      "waitBetweenTries": 2000,
-      "onError": "continueRegularOutput"
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -137,6 +136,46 @@
           "name": "VRM Alerts Webhook Auth"
         }
       }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $('Sign Portal Link').item.json;\nif (!item.email) return [];\nconst escapeHtml = (value) => String(value || '').replace(/[&<>\"']/g, (c) => ({\n  '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'\n}[c]));\nreturn [{\n  json: {\n    to: item.email,\n    subject: 'Evaluación de seguridad de proveedores - VRM',\n    html: '<div style=\"font-family:Arial,sans-serif;max-width:640px;margin:auto;padding:24px;color:#0f172a\">' +\n      '<h2>Evaluación de seguridad de proveedores</h2>' +\n      '<p>Hola,</p>' +\n      '<p>Se solicita completar la evaluación de seguridad de <strong>' + escapeHtml(item.legal_name) + '</strong>.</p>' +\n      '<p>Utiliza el siguiente enlace seguro, válido durante 30 días y de un solo uso:</p>' +\n      '<p><a href=\"' + escapeHtml(item.link) + '\" style=\"display:inline-block;padding:12px 18px;background:#0891b2;color:#fff;text-decoration:none;border-radius:6px\">Completar evaluación</a></p>' +\n      '<p style=\"font-size:12px;color:#64748b\">Si no esperabas esta solicitud, contacta al equipo responsable de gestión de proveedores.</p>' +\n      '</div>'\n  }\n}];"
+      },
+      "id": "prepare-invitation",
+      "name": "Prepare Invitation Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "toEmail": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "html",
+        "html": "={{ $json.html }}",
+        "options": {}
+      },
+      "id": "send-invitation-email",
+      "name": "Send Invitation Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1660,
+        300
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "smtpVrm",
+          "name": "SMTP VRM"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     }
   ],
   "connections": {
@@ -189,6 +228,28 @@
         [
           {
             "node": "Find Due Vendors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Backend (envío email)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Invitation Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Invitation Email": {
+      "main": [
+        [
+          {
+            "node": "Send Invitation Email",
             "type": "main",
             "index": 0
           }
