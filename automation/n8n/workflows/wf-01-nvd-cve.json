@@ -96,13 +96,32 @@
           "batching": {
             "batch": {
               "batchSize": 1,
-              "batchInterval": 700
+              "batchInterval": 6000
             }
           },
           "response": {
             "response": {
               "fullResponse": true,
               "neverError": true
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "startIndex",
+                    "value": "={{ $pageCount * 2000 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.statusCode !== 200 || ($response.body.startIndex + $response.body.resultsPerPage >= $response.body.totalResults) }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 6000
             }
           }
         }
@@ -128,7 +147,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const MIN = Number($env.NVD_MIN_CVSS || 7.0);\nconst win = $('Get Window').first().json;\nconst items = $input.all();\nconst seen = new Set();\nconst out = [];\nlet failed = 0, scanned = 0, belowThreshold = 0;\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json;\n  const tech = $('Get Technologies').itemMatching(i).json;\n  if (!resp || resp.statusCode !== 200 || !resp.body || !Array.isArray(resp.body.vulnerabilities)) { failed++; continue; }\n  scanned++;\n  for (const entry of resp.body.vulnerabilities) {\n    const cve = entry.cve;\n    if (!cve || cve.vulnStatus === 'Rejected') continue;\n    const m = cve.metrics || {};\n    const metric = (m.cvssMetricV40 || m.cvssMetricV31 || m.cvssMetricV30 || m.cvssMetricV2 || [])[0];\n    const score = metric && metric.cvssData ? Number(metric.cvssData.baseScore) : null;\n    if (score === null || isNaN(score) || score < MIN) { belowThreshold++; continue; }\n    const key = tech.vendor_id + '|' + cve.id;\n    if (seen.has(key)) continue;\n    seen.add(key);\n    const severity = score >= 9 ? 'critical' : score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low';\n    const desc = ((cve.descriptions || []).find(d => d.lang === 'en') || {}).value || 'Sin descripción';\n    out.push({ json: {\n      kind: 'finding', vendor_id: tech.vendor_id, source: 'nvd', source_ref: cve.id,\n      title: (cve.id + ' (CVSS ' + score + ') — ' + (tech.product_name || tech.cpe_match)).slice(0, 300),\n      description: desc.slice(0, 2000), severity,\n      evidence: { cve_id: cve.id, cvss: score, published: cve.published, last_modified: cve.lastModified,\n                  cpe_match: tech.cpe_match,\n                  references: (cve.references || []).slice(0, 5).map(r => r.url) }\n    }});\n  }\n}\nconst findings = out.length;\n// Si hubo fallos NO avanzamos la ventana, para reintentar esos rangos (los findings se deduplican).\nout.push({ json: { kind: 'summary', job_type: 'nvd', interval_min: 360,\n  status: failed > 0 ? 'partial' : 'ok',\n  last_run: failed > 0 ? win.win_start : win.win_end,\n  meta: { technologies: items.length, scanned, failed, findings, below_threshold: belowThreshold,\n          window: [win.win_start, win.win_end] } } });\nreturn out;"
+        "jsCode": "const MIN = Number($env.NVD_MIN_CVSS || 7.0);\nconst win = $('Get Window').first().json;\nconst items = $input.all();\nconst seen = new Set();\nconst out = [];\nconst technologyStates = new Map();\nlet belowThreshold = 0;\n\nfor (let i = 0; i < items.length; i++) {\n  const resp = items[i].json;\n  const tech = $('Get Technologies').itemMatching(i).json;\n  const key = String(tech.id || (tech.vendor_id + '|' + tech.cpe_match));\n  const state = technologyStates.get(key) || {\n    tech,\n    totalResults: null,\n    lastEnd: 0,\n    failed: false\n  };\n  technologyStates.set(key, state);\n\n  if (!resp || resp.statusCode !== 200 || !resp.body || !Array.isArray(resp.body.vulnerabilities)) {\n    state.failed = true;\n    continue;\n  }\n\n  const body = resp.body;\n  state.totalResults = Number(body.totalResults ?? body.vulnerabilities.length);\n  state.lastEnd = Number(body.startIndex || 0) + Number(body.resultsPerPage ?? body.vulnerabilities.length);\n\n  for (const entry of body.vulnerabilities) {\n    const cve = entry.cve;\n    if (!cve || cve.vulnStatus === 'Rejected') continue;\n    const m = cve.metrics || {};\n    const metric = (m.cvssMetricV40 || m.cvssMetricV31 || m.cvssMetricV30 || m.cvssMetricV2 || [])[0];\n    const score = metric && metric.cvssData ? Number(metric.cvssData.baseScore) : null;\n    if (score === null || isNaN(score) || score < MIN) { belowThreshold++; continue; }\n    const findingKey = tech.vendor_id + '|' + cve.id;\n    if (seen.has(findingKey)) continue;\n    seen.add(findingKey);\n    const severity = score >= 9 ? 'critical' : score >= 7 ? 'high' : score >= 4 ? 'medium' : 'low';\n    const desc = ((cve.descriptions || []).find(d => d.lang === 'en') || {}).value || 'Sin descripción';\n    out.push({ json: {\n      kind: 'finding', vendor_id: tech.vendor_id, source: 'nvd', source_ref: cve.id,\n      title: (cve.id + ' (CVSS ' + score + ') — ' + (tech.product_name || tech.cpe_match)).slice(0, 300),\n      description: desc.slice(0, 2000), severity,\n      evidence: { cve_id: cve.id, cvss: score, published: cve.published, last_modified: cve.lastModified,\n                  cpe_match: tech.cpe_match,\n                  references: (cve.references || []).slice(0, 5).map(r => r.url) }\n    }});\n  }\n}\n\nlet scanned = 0;\nlet failed = 0;\nfor (const state of technologyStates.values()) {\n  if (state.failed || state.totalResults === null || state.lastEnd < state.totalResults) failed++;\n  else scanned++;\n}\n\nconst findings = out.length;\nout.push({ json: { kind: 'summary', job_type: 'nvd', interval_min: 360,\n  status: failed > 0 ? 'partial' : 'ok',\n  last_run: failed > 0 ? win.win_start : win.win_end,\n  meta: { technologies: technologyStates.size, scanned, failed, findings, below_threshold: belowThreshold,\n          window: [win.win_start, win.win_end], page_size: 2000, max_pages_per_technology: 50 }\n} });\nreturn out;"
       },
       "id": "parse",
       "name": "Parse CVEs",
