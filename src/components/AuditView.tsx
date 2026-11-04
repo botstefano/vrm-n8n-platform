@@ -14,21 +14,17 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { AuditLogEntry } from '../types';
-import { store } from '../services/store';
 
 interface AuditViewProps {
   auditLog: AuditLogEntry[];
   auditArchive: AuditLogEntry[];
+  onExecuteWorkflow: (workflowId: string) => Promise<void>;
 }
 
-export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive }) => {
+export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive, onExecuteWorkflow }) => {
   const [activeTab, setActiveTab] = useState<'live' | 'archive'>('live');
   const [searchTerm, setSearchTerm] = useState('');
-  const [cleanupResult, setCleanupResult] = useState<{
-    closedFindings: number;
-    archivedAudit: number;
-    purgedScores: number;
-  } | null>(null);
+  const [cleanupRequested, setCleanupRequested] = useState(false);
 
   const displayedList = activeTab === 'live' ? auditLog : auditArchive;
   const filteredList = displayedList.filter((entry) => {
@@ -43,10 +39,10 @@ export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive }) 
 
   const handleRunCleanup = async () => {
     try {
-      const result = await store.runCleanupAndArchive(90, 5);
-      setCleanupResult(result);
+      await onExecuteWorkflow('wf-10');
+      setCleanupRequested(true);
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'No se pudo ejecutar la limpieza.');
+      alert(error instanceof Error ? error.message : 'No se pudo solicitar WF-10.');
     }
   };
 
@@ -102,20 +98,19 @@ export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive }) 
         </div>
       </div>
 
-      {/* WF-10 Summary Banner if triggered */}
-      {cleanupResult && (
+      {cleanupRequested && (
         <div className="p-4 rounded-xl bg-cyan-950/60 border border-cyan-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <CheckCircle2 className="w-5 h-5 text-cyan-400 shrink-0" />
             <div>
-              <div className="text-xs font-bold text-white">WF-10 Cleanup & Archive ejecutado exitosamente</div>
+              <div className="text-xs font-bold text-white">Solicitud de WF-10 aceptada</div>
               <div className="text-[11px] text-cyan-300/80">
-                {cleanupResult.closedFindings} hallazgos obsoletos cerrados con resolución <code className="font-mono">auto_closed_stale</code> · {cleanupResult.archivedAudit} registros movidos a <code className="font-mono">audit_log_archive</code>.
+                n8n recibió la solicitud. Los cambios aparecerán en auditoría cuando el workflow termine.
               </div>
             </div>
           </div>
           <button
-            onClick={() => setCleanupResult(null)}
+            onClick={() => setCleanupRequested(false)}
             className="text-xs text-slate-400 hover:text-slate-200"
           >
             Cerrar
