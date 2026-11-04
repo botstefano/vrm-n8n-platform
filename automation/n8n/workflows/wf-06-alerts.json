@@ -513,6 +513,32 @@
       "maxTries": 3,
       "waitBetweenTries": 2000,
       "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $('Normalize Alert').first().json || {};\nreturn [{ json: {\n  alert_id: alert.alert_id || null,\n  vendor_id: alert.vendor_id || null,\n  severity: alert.severity,\n  delivery_status: 'failed',\n  title: alert.title,\n  fingerprint: alert.fingerprint,\n  source: alert.source || null,\n  source_ref: alert.source_ref || null,\n  description: alert.description || null,\n  details: { route: alert.route, slack: 'failed', email: alert.route === 'slack+email' ? 'not_attempted' : 'not_required' }\n} }];"
+      },
+      "id": "alert-callback-slack-failed",
+      "name": "Build Alert Callback Slack Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        1440
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $('Normalize Alert').first().json || {};\nreturn [{ json: {\n  alert_id: alert.alert_id || null,\n  vendor_id: alert.vendor_id || null,\n  severity: alert.severity,\n  delivery_status: 'failed',\n  title: alert.title,\n  fingerprint: alert.fingerprint,\n  source: alert.source || null,\n  source_ref: alert.source_ref || null,\n  description: alert.description || null,\n  details: { route: alert.route, slack: 'sent', email: 'failed' }\n} }];"
+      },
+      "id": "alert-callback-email-failed",
+      "name": "Build Alert Callback Email Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        1620
+      ]
     }
   ],
   "connections": {
@@ -731,7 +757,7 @@
             "index": 0
           },
           {
-            "node": "Build Alert Callback Failed",
+            "node": "Build Alert Callback Slack Failed",
             "type": "main",
             "index": 0
           }
@@ -747,7 +773,7 @@
             "index": 0
           },
           {
-            "node": "Build Alert Callback Failed",
+            "node": "Build Alert Callback Email Failed",
             "type": "main",
             "index": 0
           }
@@ -810,6 +836,28 @@
       ]
     },
     "Build Alert Callback Failed": {
+      "main": [
+        [
+          {
+            "node": "Report Alert Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert Callback Slack Failed": {
+      "main": [
+        [
+          {
+            "node": "Report Alert Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert Callback Email Failed": {
       "main": [
         [
           {
