@@ -238,21 +238,21 @@ app.get('/api/bootstrap', async (req, res, next) => {
     }
     const payload = {
       user: { ...req.user, roles: roleMap.get(req.user.id) || req.user.roles },
-      vendors: rows.vendors,
+      vendors: rows.vendors.map((vendor) => ({ ...vendor, website: vendor.website || '', current_score: Number(vendor.current_score ?? 100), primary_contact: vendor.primary_contact || {} })),
       technologies: rows.vendor_technologies,
       questionnaires: rows.questionnaires.map((q) => ({ ...q, sections: q.definition?.sections || [] })),
-      assessments: rows.assessments,
-      findings: rows.vendor_findings,
+      assessments: rows.assessments.map((assessment) => ({ ...assessment, score: assessment.score === null ? null : Number(assessment.score) })),
+      findings: rows.vendor_findings.map((finding) => ({ ...finding, description: finding.description || '', evidence: finding.evidence || {} })),
       monitoringJobs: rows.monitoring_jobs.map((job) => ({
         ...job,
         status: job.status === 'ok' || job.status === 'healthy' ? 'healthy'
           : job.status === 'error' || job.status === 'failed' ? 'failed'
           : job.status === 'partial' ? 'overdue' : (job.status || 'idle')
       })),
-      users: rows.users.map((u) => ({ ...u, roles: roleMap.get(u.id) || [] })),
-      auditLog: rows.audit_log,
-      auditArchive: rows.audit_log_archive,
-      scoreHistory: rows.score_history,
+      users: rows.users.map((u) => ({ ...u, full_name: u.full_name || u.email, roles: roleMap.get(u.id) || [] })),
+      auditLog: rows.audit_log.map((entry) => ({ ...entry, actor: entry.actor || 'system', entity: entry.entity || '', entity_id: entry.entity_id || '', details: entry.details || {} })),
+      auditArchive: rows.audit_log_archive.map((entry) => ({ ...entry, actor: entry.actor || 'system', entity: entry.entity || '', entity_id: entry.entity_id || '', details: entry.details || {} })),
+      scoreHistory: rows.score_history.map((entry) => ({ ...entry, score: Number(entry.score || 0) })),
       alerts: rows.alert_notifications.map((a) => ({
         ...a, timestamp: a.created_at, status: a.delivery_status,
         vendor_name: rows.vendors.find((v) => v.id === a.vendor_id)?.legal_name
@@ -294,6 +294,9 @@ app.patch('/api/vendors/:id', allowRoles('admin','risk_analyst'), async (req, re
     const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => allowed.includes(key)));
     const { data, error } = await supabase.from('vendors').update(updates).eq('id', req.params.id).select().single();
     if (error) throw error;
+    if (['criticality','next_evaluation','status'].some((key) => Object.prototype.hasOwnProperty.call(updates, key))) {
+      await recalculateVendorScore(data.id);
+    }
     await writeAudit(req, 'update_vendor', 'vendors', data.id, updates);
     res.json(data);
   } catch (error) { next(error); }
@@ -351,7 +354,7 @@ app.post('/api/findings', allowRoles('admin','risk_analyst'), async (req, res, n
 
 app.patch('/api/findings/:id', allowRoles('admin','risk_analyst'), async (req, res, next) => {
   try {
-    const allowed = ['status','resolution','due_date'];
+    const allowed = ['status','severity','resolution','due_date'];
     const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => allowed.includes(key)));
     if (updates.status === 'closed') updates.closed_at = new Date().toISOString();
     const { data, error } = await supabase.from('vendor_findings').update(updates).eq('id', req.params.id).select().single();
