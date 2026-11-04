@@ -1,5 +1,5 @@
 -- VRM n8n Platform — habilitar acceso del backend a través del Data API de Supabase
--- Ejecutar una sola vez después de 01-schema.sql en Supabase SQL Editor.
+-- Ejecutar después del esquema inicial y de todas las migraciones incrementales en Supabase SQL Editor.
 -- Solo service_role recibe privilegios Data API. anon/authenticated no reciben grants.
 
 begin;
