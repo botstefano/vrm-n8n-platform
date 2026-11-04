@@ -103,6 +103,7 @@ Variables adicionales usadas por los workflows de n8n:
 | `SMTP_FROM` | Dirección remitente usada por los nodos SMTP |
 | `NVD_MIN_CVSS` | Umbral CVSS (por defecto 7) |
 | `CT_LOOKBACK_DAYS` | Ventana de búsqueda de certificados (por defecto 3 días) |
+| `WORKFLOW_STALE_HOURS` | Marca como fallidas las ejecuciones manuales sin callback después de este plazo (12 horas por defecto) |
 | `STALE_FINDING_DAYS` | Antigüedad para cierre de hallazgos obsoletos |
 | `AUDIT_RETENTION_YEARS` | Retención del log de auditoría |
 | `SCORE_RETENTION_YEARS` | Retención del histórico de puntuaciones |
@@ -137,6 +138,7 @@ No inventes los hosts, puertos ni nombres de conexión: copia los datos de Conne
 ## 5. Alcance y limitaciones conocidas
 
 - La API implementa login autenticado, validación de JWT/RBAC, bootstrap de datos, operaciones de proveedores, tecnologías, hallazgos, evaluaciones internas, alertas, scorecards y limpieza.
+- WF-08 marca como fallidas las ejecuciones manuales que sigan en `running` sin callback durante `WORKFLOW_STALE_HOURS` (12 horas por defecto), evitando que queden abiertas indefinidamente.
 - Las ejecuciones manuales se envían a n8n mediante webhooks autenticados. Los workflows WF-01 a WF-10 notifican al backend su resultado final (`success`, `partial` o `failed`) mediante un callback autenticado con secreto compartido y el panel actualiza el historial mientras existan ejecuciones en curso. Si una ejecución termina abruptamente antes de alcanzar su callback, puede permanecer como `running`; revisa WF-00 y los registros de ejecución de n8n para diagnosticar ese caso.
 - El portal público de proveedores utiliza enlaces HMAC con vencimiento de 30 días y un solo uso. La API valida la firma y el estado del enlace, calcula la puntuación en el servidor y persiste las respuestas en Supabase. La entrega real del correo depende de que el workflow WF-05 y la credencial SMTP estén configurados.
 - WF-03 comprueba la vigencia de certificados X.509 y detecta expiraciones próximas; no realiza todavía una auditoría de suites de cifrado TLS.
