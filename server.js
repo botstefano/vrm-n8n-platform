@@ -700,6 +700,7 @@ app.patch('/api/findings/:id', allowRoles('admin','risk_analyst'), async (req, r
     const isEscalation = Object.prototype.hasOwnProperty.call(updates, 'severity') &&
       (severityRank[updates.severity] ?? -1) > (severityRank[previous.severity] ?? -1) &&
       previous.status !== 'closed';
+    const isReopened = previous.status === 'closed' && updates.status === 'open';
     if (isEscalation && previous.status === 'accepted') {
       updates.status = 'open';
       updates.resolution = null;
@@ -712,7 +713,7 @@ app.patch('/api/findings/:id', allowRoles('admin','risk_analyst'), async (req, r
     if (error) throw error;
     await writeAudit(req, 'update_finding_status', 'vendor_findings', data.id, updates);
     await recalculateVendorScore(data.vendor_id);
-    if (isEscalation && ['critical','high'].includes(data.severity)) {
+    if ((isEscalation || isReopened) && ['critical','high'].includes(data.severity)) {
       try {
         await dispatchAlertRecord({
           severity: data.severity, title: '[ESCALATED] ' + data.title, vendor_id: data.vendor_id,
