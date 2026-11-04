@@ -60,7 +60,7 @@ export const WORKFLOWS_REGISTRY: WorkflowSummary[] = [
     code: 'WF-05',
     name: 'Periodic Re-evaluation Scheduler',
     trigger: 'Cron (Every 6h)',
-    scheduleDescription: 'Every 6 hours (0 */6 * * *)',
+    scheduleDescription: 'Every 6 hours (n8n interval)',
     description: 'Detects vendors due for security reevaluation according to criticality (Critical: 90 days, High: 180 days, Others: 365 days). Generates HMAC-SHA256 signed portal link and creates assessment.',
     targetSources: ['assessment'],
     status: 'active'
