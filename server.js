@@ -276,7 +276,8 @@ async function dispatchAlertRecord(payload, reqUser = null) {
   ].join(':');
   const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const { data: duplicate, error: duplicateError } = await supabase
-    .from('alert_notifications').select('id').eq('fingerprint', fingerprint).gt('created_at', cutoff).limit(1);
+    .from('alert_notifications').select('id').eq('fingerprint', fingerprint).gt('created_at', cutoff)
+    .in('delivery_status', ['sent','deduped']).limit(1);
   if (duplicateError) throw duplicateError;
   const deduped = (duplicate || []).length > 0;
   const row = {
