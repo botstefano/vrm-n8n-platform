@@ -45,7 +45,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const out = [];\nfor (const it of $input.all()) {\n  const v = it.json;\n  try {\n    const u = new URL(/^https?:\\/\\//i.test(v.website) ? v.website : 'https://' + v.website);\n    const domain = u.hostname.replace(/^www\\./i, '').toLowerCase();\n    if (!domain.includes('.')) continue;\n    out.push({ json: { vendor_id: v.id, legal_name: v.legal_name, domain } });\n  } catch (e) { /* URL inválida: se ignora */ }\n}\nreturn out;"
+        "jsCode": "const out = [];\nfor (const it of $input.all()) {\n  const v = it.json;\n  try {\n    const u = new URL(/^https?:\\/\\//i.test(v.website) ? v.website : 'https://' + v.website);\n    const domain = u.hostname.replace(/^www\\./i, '').toLowerCase();\n    if (!domain.includes('.')) continue;\n    out.push({ json: { vendor_id: v.id, legal_name: v.legal_name, domain } });\n  } catch (e) { /* URL inválida: se ignora */ }\n}\nif (!out.length) {\n  return [{ json: {\n    kind: 'summary',\n    job_type: 'ct_log',\n    interval_min: 1440,\n    status: 'ok',\n    last_run: new Date().toISOString(),\n    meta: { domains: items.length, ok: 0, failed: 0, findings: 0, invalid_websites: items.length, lookback_days: Number($env.CT_LOOKBACK_DAYS || 3) }\n  } }];\n}\nreturn out;"
       },
       "id": "extract",
       "name": "Extract Domain",
@@ -420,6 +420,52 @@
         920,
         520
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-domain",
+              "leftValue": "={{ Boolean($json.domain) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-host-wf-02",
+      "name": "IF Has Domains",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all();"
+      },
+      "id": "pass-empty-summary-wf-02",
+      "name": "Pass Empty Host Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        760
+      ]
     }
   ],
   "connections": {
@@ -449,7 +495,7 @@
       "main": [
         [
           {
-            "node": "crt.sh Query",
+            "node": "IF Has Domains",
             "type": "main",
             "index": 0
           }
@@ -575,6 +621,40 @@
       ]
     },
     "Build Empty Summary": {
+      "main": [
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Domains": {
+      "main": [
+        [
+          {
+            "node": "crt.sh Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Pass Empty Host Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass Empty Host Summary": {
       "main": [
         [
           {
