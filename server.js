@@ -490,6 +490,9 @@ app.post('/api/v1/webhooks/n8n/alert-dispatched', requireDatabase, verifyN8nSign
     };
 
     if (body.alert_id) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(body.alert_id))) {
+        return res.status(400).json({ error: 'alert_id no es un UUID válido.' });
+      }
       const { data, error } = await supabase.from('alert_notifications').update({
         delivery_status: deliveryStatus,
         delivery_meta: details
@@ -517,6 +520,14 @@ app.post('/api/v1/webhooks/n8n/alert-dispatched', requireDatabase, verifyN8nSign
       delivery_meta: details
     }).select().single();
     if (error) throw error;
+    const { error: auditError } = await supabase.from('audit_log').insert({
+      actor: 'n8n',
+      action: 'alert_dispatched',
+      entity: 'alert_notifications',
+      entity_id: data.id,
+      details: { delivery_status: deliveryStatus, severity, source: data.source, source_ref: data.source_ref }
+    });
+    if (auditError) console.error('Alert was stored but its audit entry could not be written:', auditError.message);
     res.status(201).json({ received: true, alert_id: data.id, delivery_status: deliveryStatus, created: true });
   } catch (error) { next(error); }
 });
