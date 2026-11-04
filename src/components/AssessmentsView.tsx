@@ -69,7 +69,7 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
     setTimeout(() => setCopiedToken(null), 2000);
   };
 
-  const handlePortalSubmit = () => {
+  const handlePortalSubmit = async () => {
     if (!selectedAssessmentForPortal) return;
     // Calculate simulated score from answers
     let totalScore = 0;
@@ -80,9 +80,13 @@ export const AssessmentsView: React.FC<AssessmentsViewProps> = ({
     const q5 = qAnswers['q2-3'] ? 15 : 0;
     totalScore = q1 + q2 + q3 + q4 + q5;
 
-    store.completeAssessment(selectedAssessmentForPortal.id, totalScore, qAnswers);
-    alert(`Respuestas enviadas para guardar en Supabase. Calificación: ${totalScore}/100.`);
-    setSelectedAssessmentForPortal(null);
+    try {
+      await store.completeAssessment(selectedAssessmentForPortal.id, totalScore, qAnswers);
+      alert(`Evaluación guardada en Supabase. Calificación: ${totalScore}/100.`);
+      setSelectedAssessmentForPortal(null);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'No se pudo guardar la evaluación.');
+    }
   };
 
   return (
