@@ -29,6 +29,7 @@ export const AssessmentPortalView: React.FC<AssessmentPortalViewProps> = ({ toke
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [score, setScore] = useState<number | null>(null);
+  const [completionWarning, setCompletionWarning] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -54,11 +55,14 @@ export const AssessmentPortalView: React.FC<AssessmentPortalViewProps> = ({ toke
     setSubmitting(true);
     setError(null);
     try {
-      const result = await publicApiRequest<{ completed: boolean; score: number; message: string }>(
+      const result = await publicApiRequest<{ completed: boolean; score: number; message: string; vendorStatusUpdated?: boolean; scorecardUpdated?: boolean }>(
         `/api/public/assessments/${encodeURIComponent(token)}/complete`,
         { method: 'POST', body: { responses: answers } }
       );
       setScore(result.score);
+      if (result.vendorStatusUpdated === false || result.scorecardUpdated === false) {
+        setCompletionWarning('Tus respuestas se guardaron correctamente, pero el sistema no pudo actualizar todos los datos internos. El equipo de gestión de proveedores ha sido informado.');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo registrar la evaluación.');
     } finally {
@@ -148,6 +152,11 @@ export const AssessmentPortalView: React.FC<AssessmentPortalViewProps> = ({ toke
             <p className="mt-2 text-sm text-slate-300">Tu respuesta se guardó correctamente.</p>
             <div className="mt-5 text-4xl font-bold text-emerald-300">{score.toFixed(1)}<span className="text-base text-slate-400">/100</span></div>
             <p className="mt-3 text-xs text-slate-400">El enlace ha sido invalidado y no puede volver a utilizarse.</p>
+            {completionWarning && (
+              <p className="mt-4 rounded-lg border border-amber-800 bg-amber-950/30 p-3 text-xs text-amber-200">
+                {completionWarning}
+              </p>
+            )}
           </div>
         )}
 
