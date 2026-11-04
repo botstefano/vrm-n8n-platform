@@ -269,6 +269,15 @@ class VrmStore {
     }
   }
 
+  public async recalculateScorecard(vendorId: string): Promise<{ score: number; risk: string }> {
+    const result = await apiRequest<{ score: number; risk: string }>(
+      `/api/scorecards/recalculate/${encodeURIComponent(vendorId)}`,
+      { method: 'POST', body: {} }
+    );
+    await this.hydrateFromApi();
+    return result;
+  }
+
   // Re-evaluation creation is server-side; signing secrets never run in the browser.
   public async triggerReevaluationForDue(): Promise<{ assessmentsCreated: number; assessments?: Assessment[] }> {
     const result = await apiRequest<{ assessmentsCreated: number; assessments?: Assessment[] }>(
