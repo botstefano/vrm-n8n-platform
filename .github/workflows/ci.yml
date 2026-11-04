@@ -138,5 +138,31 @@ jobs:
             }
           }
           if (workflowCount !== 11) throw new Error(`Expected 11 workflows, found ${workflowCount}`);
-          console.log(`Validated ${workflowCount} workflows, their connections/manual triggers, and ${codeNodeCount} Code node scripts.`);
+
+          // Guard known integration contracts against regressions.
+          const nvd = JSON.parse(fs.readFileSync(`${path}/wf-01-nvd-cve.json`, 'utf8'));
+          const nvdRequest = nvd.nodes.find((node) => node.name === 'NVD Query');
+          const nvdPageSize = nvdRequest?.parameters?.queryParameters?.parameters
+            ?.find((parameter) => parameter.name === 'resultsPerPage')?.value;
+          if (String(nvdPageSize) !== '2000') throw new Error('WF-01 must request the NVD maximum page size (2000)');
+
+          const tls = JSON.parse(fs.readFileSync(`${path}/wf-03-tls-expiry.json`, 'utf8'));
+          const tlsInsert = tls.nodes.find((node) => node.name === 'Insert Finding');
+          const tlsQuery = tlsInsert?.parameters?.query || '';
+          if (!tlsQuery.includes("$7::jsonb ->> 'host'") ||
+              !tlsQuery.includes("$7::jsonb ->> 'port'") ||
+              !tlsQuery.includes('source_ref <> $3')) {
+            throw new Error('WF-03 must retire superseded certificate findings by host and port, not by the full dated reference');
+          }
+
+          const server = fs.readFileSync('server.js', 'utf8');
+          const failedCallback = server.slice(
+            server.indexOf("app.post('/api/v1/webhooks/n8n/workflow-failed'"),
+            server.indexOf("app.post('/api/v1/webhooks/n8n/workflow-completed'")
+          );
+          if (!failedCallback.includes('if (auditError) throw auditError;')) {
+            throw new Error('n8n failure callback must return an error when its audit event cannot be persisted');
+          }
+
+          console.log(`Validated ${workflowCount} workflows, their connections/manual triggers, ${codeNodeCount} Code node scripts, and critical API/workflow contracts.`);
           NODE
