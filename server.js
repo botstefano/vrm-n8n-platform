@@ -327,7 +327,8 @@ async function dispatchAlertRecord(payload, reqUser = null) {
       const response = await fetch(process.env.N8N_BASE_URL.replace(/\/$/, '') + '/webhook/vrm-alerts', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'X-Alert-Token': process.env.ALERTS_WEBHOOK_TOKEN },
-        body: JSON.stringify({ ...payload, severity, fingerprint, alert_id: data.id })
+        body: JSON.stringify({ ...payload, severity, fingerprint, alert_id: data.id }),
+        signal: AbortSignal.timeout(15000)
       });
       const responseBody = await response.json().catch(() => ({}));
       finalDeliveryStatus = !response.ok ? 'failed' : (responseBody.deduped ? 'deduped' : 'sent');
@@ -1014,6 +1015,7 @@ app.post('/api/workflows/:workflowCode/execute', allowRoles('admin','risk_analys
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'X-Alert-Token': process.env.ALERTS_WEBHOOK_TOKEN },
+      signal: AbortSignal.timeout(15000),
       body: JSON.stringify({
         requested_by: req.user.email,
         workflow_code: code,
