@@ -65,7 +65,7 @@ Para el backend, copia el Project URL y la Secret key desde Project Settings / A
 
 ## 3. n8n y workflows
 
-Importa o actualiza los JSON de `automation/n8n/workflows/` en n8n. Cada workflow WF-00 a WF-10 contiene un webhook manual adicional con una ruta `vrm-manual/wf-XX`. Activa los workflows después de configurar y validar sus credenciales.
+Importa o actualiza los JSON de `automation/n8n/workflows/` en n8n. Los workflows WF-01 a WF-10 contienen un webhook manual adicional con una ruta `vrm-manual/wf-XX`. WF-00 se mantiene como manejador global de errores y se ejecuta por evento, no manualmente. Activa los workflows después de configurar y validar sus credenciales.
 
 Crea/configura en n8n:
 
