@@ -58,7 +58,7 @@ npm start
 
 ## Supabase y Render
 
-La guía de configuración completa está en [SUPABASE_RENDER_SETUP.md](./SUPABASE_RENDER_SETUP.md). Incluye variables de entorno, Supabase Auth y roles, PostgreSQL desde n8n, importación de workflows y pruebas iniciales.
+La guía de configuración completa está en [SUPABASE_RENDER_SETUP.md](./SUPABASE_RENDER_SETUP.md). Incluye variables de entorno, Supabase Auth y roles, los grants necesarios para `service_role`, PostgreSQL desde n8n, importación de workflows y pruebas iniciales.
 
 ## Seguridad y estado
 
