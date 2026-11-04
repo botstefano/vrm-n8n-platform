@@ -60,18 +60,32 @@ async function authenticate(req, res, next) {
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data?.user) return res.status(401).json({ error: 'Sesión inválida o expirada.' });
 
-    const { data: profile, error: profileError } = await supabase
+    // New schemas use auth.users.id as the profile ID. Existing installations may
+    // have legacy UUIDs in public.users, so fall back to the verified Auth email.
+    let { data: profile, error: profileError } = await supabase
       .from('users').select('id,email,full_name,is_active').eq('id', data.user.id).maybeSingle();
     if (profileError) throw profileError;
+    if (!profile && data.user.email) {
+      const fallback = await supabase.from('users')
+        .select('id,email,full_name,is_active').eq('email', data.user.email).maybeSingle();
+      if (fallback.error) throw fallback.error;
+      profile = fallback.data;
+    }
     if (!profile || !profile.is_active) return res.status(403).json({ error: 'Usuario no habilitado en VRM.' });
 
     const { data: memberships, error: roleError } = await supabase
-      .from('user_roles').select('roles(code,name)').eq('user_id', data.user.id);
+      .from('user_roles').select('roles(code,name)').eq('user_id', profile.id);
     if (roleError) throw roleError;
     const roles = (memberships || []).map((item) => item.roles?.code).filter(Boolean);
     if (!roles.length) return res.status(403).json({ error: 'El usuario no tiene un rol asignado en VRM.' });
 
-    req.user = { id: data.user.id, email: profile.email, full_name: profile.full_name, roles };
+    req.user = {
+      id: data.user.id,
+      profile_id: profile.id,
+      email: data.user.email || profile.email,
+      full_name: profile.full_name,
+      roles
+    };
     next();
   } catch (error) {
     next(error);
@@ -493,7 +507,7 @@ app.get('/api/bootstrap', async (req, res, next) => {
       roleMap.set(membership.user_id, [...(roleMap.get(membership.user_id) || []), role.code]);
     }
     const payload = {
-      user: { ...req.user, roles: roleMap.get(req.user.id) || req.user.roles },
+      user: { ...req.user, roles: roleMap.get(req.user.profile_id) || req.user.roles },
       vendors: rows.vendors.map((vendor) => ({ ...vendor, website: vendor.website || '', current_score: Number(vendor.current_score ?? 100), primary_contact: vendor.primary_contact || {} })),
       technologies: rows.vendor_technologies,
       questionnaires: rows.questionnaires.map((q) => ({ ...q, sections: q.definition?.sections || [] })),
