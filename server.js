@@ -700,6 +700,11 @@ app.patch('/api/findings/:id', allowRoles('admin','risk_analyst'), async (req, r
     const isEscalation = Object.prototype.hasOwnProperty.call(updates, 'severity') &&
       (severityRank[updates.severity] ?? -1) > (severityRank[previous.severity] ?? -1) &&
       previous.status !== 'closed';
+    if (isEscalation && previous.status === 'accepted') {
+      updates.status = 'open';
+      updates.resolution = null;
+      updates.closed_at = null;
+    }
     if (Object.prototype.hasOwnProperty.call(updates, 'status')) {
       updates.closed_at = updates.status === 'closed' ? new Date().toISOString() : null;
     }
