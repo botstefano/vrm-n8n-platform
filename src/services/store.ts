@@ -218,11 +218,24 @@ class VrmStore {
     );
 
     if (existing) {
-      // If severity escalated, update and alert
-      if (existing.severity !== findingData.severity && existing.status !== 'closed') {
-        existing.severity = findingData.severity;
+      const severityRank: Record<FindingSeverity, number> = {
+        info: 0, low: 1, medium: 2, high: 3, critical: 4
+      };
+      const severityEscalated = severityRank[findingData.severity] > severityRank[existing.severity];
+      const reopen = existing.status === 'closed';
+      if (severityEscalated || reopen) {
+        if (severityEscalated) existing.severity = findingData.severity;
+        existing.status = 'open';
+        existing.resolution = null;
+        existing.closed_at = null;
         this.remote(apiRequest(`/api/findings/${existing.id}`, {
-          method: 'PATCH', body: { severity: findingData.severity }
+          method: 'PATCH',
+          body: {
+            status: 'open',
+            severity: existing.severity,
+            resolution: null,
+            due_date: findingData.due_date || existing.due_date
+          }
         }));
         this.notify();
       }
