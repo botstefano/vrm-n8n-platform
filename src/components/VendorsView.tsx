@@ -465,18 +465,19 @@ export const VendorsView: React.FC<VendorsViewProps> = ({
                         <span className="font-semibold text-slate-200">{t.product_name}</span>
                         <div className="font-mono text-[11px] text-cyan-400 mt-0.5">{t.cpe_match}</div>
                       </div>
-                      <button
+                      {canWrite && <button
                         onClick={() => store.deleteTechnology(t.id)}
                         className="text-slate-500 hover:text-rose-400 p-1"
                         title="Eliminar Tecnología"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      </button>}
                     </div>
                   ))
               )}
             </div>
 
+            {canWrite && (
             {/* Add Tech Form */}
             <form onSubmit={handleAddTechnology} className="pt-2 flex flex-wrap gap-2 items-center">
               <input
@@ -500,6 +501,7 @@ export const VendorsView: React.FC<VendorsViewProps> = ({
                 + Añadir CPE
               </button>
             </form>
+            )}
           </div>
 
           {/* Section: Linked Findings */}
