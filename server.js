@@ -24,7 +24,7 @@ app.disable('x-powered-by');
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || FRONTEND_ORIGINS.includes(origin) || /^https?:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$/.test(origin)) return callback(null, true);
+    if (!origin || FRONTEND_ORIGINS.includes(origin) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return callback(null, true);
     return callback(new Error('Origen no permitido por CORS'));
   },
   credentials: true
@@ -179,7 +179,7 @@ function buildPortalLink(assessment) {
   const payload = { aid: assessment.id, vid: assessment.vendor_id, exp };
   const { token, hash } = createPortalToken(payload);
   if (hash !== assessment.portal_token_hash) return null;
-  const base = (FRONTEND_ORIGINS[0] || process.env.VRM_PORTAL_URL || '').replace(/\\/$/, '');
+  const base = (FRONTEND_ORIGINS[0] || process.env.VRM_PORTAL_URL || '').replace(/\/$/, '');
   return base ? base + '/portal/assessment/' + token : null;
 }
 
@@ -661,7 +661,7 @@ app.post('/api/assessments/reevaluate', allowRoles('admin','risk_analyst'), asyn
       }).eq('id', vendor.id);
       if (vendorUpdateError) throw vendorUpdateError;
       await writeAudit(req, 'create_assessment', 'assessments', assessment.id, { vendor_id: vendor.id });
-      const frontendBase = (FRONTEND_ORIGINS[0] || '').replace(/\\/$/, '');
+      const frontendBase = (FRONTEND_ORIGINS[0] || '').replace(/\/$/, '');
       created.push({ ...assessment, portal_link: frontendBase ? frontendBase + '/portal/assessment/' + portal.token : null });
     }
     res.json({ assessmentsCreated: created.length, assessments: created });
