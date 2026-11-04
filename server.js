@@ -535,11 +535,12 @@ app.post('/api/v1/webhooks/n8n/alert-dispatched', requireDatabase, verifyN8nSign
 app.post('/api/v1/webhooks/n8n/workflow-failed', requireDatabase, verifyN8nSignature, async (req, res, next) => {
   try {
     const body = req.body || {};
-    await supabase.from('audit_log').insert({
+    const { error: auditError } = await supabase.from('audit_log').insert({
       actor: 'n8n', action: 'workflow_failed', entity: 'n8n_workflow',
       entity_id: String(body.workflow || body.workflow_id || ''),
       details: { node: body.node, message: body.message, execution_id: body.execution_id, execution_url: body.execution_url }
     });
+    if (auditError) throw auditError;
     res.json({ received: true });
   } catch (error) { next(error); }
 });
