@@ -255,6 +255,7 @@ export function App() {
             vendors={vendors} findings={findings} jobs={jobs} alerts={alerts}
             onSelectTab={setCurrentTab}
             onExecuteWorkflow={handleExecuteWorkflow}
+            canWrite={canWrite}
             onSelectVendor={(vendorId) => { setSelectedVendorId(vendorId); setCurrentTab('vendors'); }}
           />
         )}
@@ -290,7 +291,7 @@ export function App() {
         )}
         {currentTab === 'alerts' && <AlertsView alerts={alerts} vendors={vendors} canWrite={canWrite} />}
         {currentTab === 'health' && (
-          <HealthView jobs={jobs} onExecuteWorkflow={handleExecuteWorkflow} isExecuting={isExecuting} />
+          <HealthView jobs={jobs} onExecuteWorkflow={handleExecuteWorkflow} isExecuting={isExecuting} canWrite={canWrite} />
         )}
         {currentTab === 'audit' && <AuditView
           auditLog={auditLog} auditArchive={auditArchive}
