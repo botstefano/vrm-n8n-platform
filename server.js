@@ -635,6 +635,16 @@ app.post('/api/findings', allowRoles('admin','risk_analyst'), async (req, res, n
     if (error) throw error;
     await writeAudit(req, 'insert_finding', 'vendor_findings', data.id, { title: data.title, severity: data.severity });
     await recalculateVendorScore(data.vendor_id);
+    if (['critical','high'].includes(data.severity)) {
+      try {
+        await dispatchAlertRecord({
+          severity: data.severity, title: data.title, vendor_id: data.vendor_id,
+          source: data.source, source_ref: data.source_ref, description: data.description
+        }, req.user);
+      } catch (alertError) {
+        console.error('Finding saved but alert dispatch failed:', alertError.message);
+      }
+    }
     res.status(201).json(data);
   } catch (error) { next(error); }
 });
@@ -643,6 +653,14 @@ app.patch('/api/findings/:id', allowRoles('admin','risk_analyst'), async (req, r
   try {
     const allowed = ['status','severity','resolution','due_date'];
     const updates = Object.fromEntries(Object.entries(req.body || {}).filter(([key]) => allowed.includes(key)));
+    const { data: previous, error: previousError } = await supabase.from('vendor_findings')
+      .select('id,vendor_id,title,source,source_ref,severity,status,description')
+      .eq('id', req.params.id).single();
+    if (previousError) throw previousError;
+    const severityRank = { info: 0, low: 1, medium: 2, high: 3, critical: 4 };
+    const isEscalation = Object.prototype.hasOwnProperty.call(updates, 'severity') &&
+      (severityRank[updates.severity] ?? -1) > (severityRank[previous.severity] ?? -1) &&
+      previous.status !== 'closed';
     if (Object.prototype.hasOwnProperty.call(updates, 'status')) {
       updates.closed_at = updates.status === 'closed' ? new Date().toISOString() : null;
     }
@@ -650,6 +668,16 @@ app.patch('/api/findings/:id', allowRoles('admin','risk_analyst'), async (req, r
     if (error) throw error;
     await writeAudit(req, 'update_finding_status', 'vendor_findings', data.id, updates);
     await recalculateVendorScore(data.vendor_id);
+    if (isEscalation && ['critical','high'].includes(data.severity)) {
+      try {
+        await dispatchAlertRecord({
+          severity: data.severity, title: '[ESCALATED] ' + data.title, vendor_id: data.vendor_id,
+          source: data.source, source_ref: data.source_ref, description: data.description
+        }, req.user);
+      } catch (alertError) {
+        console.error('Finding severity updated but escalation alert failed:', alertError.message);
+      }
+    }
     res.json(data);
   } catch (error) { next(error); }
 });
