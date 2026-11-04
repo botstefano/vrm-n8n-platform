@@ -29,49 +29,6 @@ import { apiRequest } from './api';
 
 function createId(): string { return crypto.randomUUID(); }
 
-function loadFromStorage<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_PREFIX + key);
-    if (!raw) return fallback;
-    return JSON.parse(raw);
-  } catch (e) {
-    console.warn(`Error loading ${key} from localStorage:`, e);
-    return fallback;
-  }
-}
-
-function saveToStorage<T>(key: string, data: T): void {
-  try {
-    localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(data));
-  } catch (e) {
-    console.warn(`Error saving ${key} to localStorage:`, e);
-  }
-}
-
-// Simple base64url encoder
-function base64UrlEncode(str: string): string {
-  try {
-    return btoa(unescape(encodeURIComponent(str)))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-  } catch {
-    return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  }
-}
-
-// Pseudo HMAC simulation for browser demo (matches n8n crypto.createHmac pattern)
-function mockHmacSha256(payload: string, secret: string = 'vrm-secret-portal-token'): string {
-  let hash = 0;
-  const combined = payload + '::' + secret;
-  for (let i = 0; i < combined.length; i++) {
-    const char = combined.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
-  }
-  return base64UrlEncode('sig_' + Math.abs(hash).toString(16) + '_verified');
-}
-
 export interface WorkflowRunLog {
   id: string;
   workflowId: string;
