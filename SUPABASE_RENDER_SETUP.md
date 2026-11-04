@@ -132,7 +132,7 @@ No inventes los hosts, puertos ni nombres de conexión: copia los datos de Conne
 ## 5. Alcance y limitaciones conocidas
 
 - La API implementa login autenticado, validación de JWT/RBAC, bootstrap de datos, operaciones de proveedores, tecnologías, hallazgos, evaluaciones internas, alertas, scorecards y limpieza.
-- Las ejecuciones manuales se envían a n8n mediante webhooks añadidos a los JSON. El estado de aceptación no equivale a que el workflow haya terminado correctamente; el resultado final requiere instrumentar callbacks de cierre de ejecución.
+- Las ejecuciones manuales se envían a n8n mediante webhooks autenticados. Los workflows WF-01 a WF-10 notifican al backend su resultado final (`success`, `partial` o `failed`) mediante un callback HMAC y el panel actualiza el historial mientras existan ejecuciones en curso. Si una ejecución termina abruptamente antes de alcanzar su callback, puede permanecer como `running`; revisa WF-00 y los registros de ejecución de n8n para diagnosticar ese caso.
 - El portal público de proveedores utiliza enlaces HMAC con vencimiento de 30 días y un solo uso. La API valida la firma y el estado del enlace, calcula la puntuación en el servidor y persiste las respuestas en Supabase. La entrega real del correo depende de que el workflow WF-05 y la credencial SMTP estén configurados.
-- La conexión de n8n con PostgreSQL, Redis, NVD, Shodan y SMTP depende de credenciales reales configuradas en tu instancia; el repositorio no contiene esas credenciales.
+- La conexión de n8n con PostgreSQL, Redis, NVD, Shodan y SMTP depende de credenciales reales configuradas en tu instancia; el repositorio no contiene esas credenciales. En alertas críticas/altas, configura `ALERT_FALLBACK_EMAIL` para evitar que la ausencia de usuarios activos con rol RBAC impida el envío SMTP.
 - Antes de producción, ejecuta pruebas funcionales, pruebas de permisos por rol, revisión de seguridad y recuperación de errores con tus servicios reales.
