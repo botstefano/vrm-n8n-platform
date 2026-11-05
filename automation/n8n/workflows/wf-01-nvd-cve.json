@@ -376,7 +376,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: {\n  kind: 'summary', job_type: 'nvd', interval_min: 360, status: 'ok',\n  last_run: $('Get Window').first().json.win_start,\n  meta: { technologies: 0, scanned: 0, failed: 0, findings: 0, below_threshold: 0 }\n} }];"
+        "jsCode": "return [{ json: {\n  kind: 'summary', job_type: 'nvd', interval_min: 360, status: 'ok',\n  last_run: new Date().toISOString(),\n  meta: { technologies: 0, scanned: 0, failed: 0, findings: 0, below_threshold: 0 }\n} }];"
       },
       "id": "build-empty-summary-wf-01-nvd-cve.json",
       "name": "Build Empty Summary",
