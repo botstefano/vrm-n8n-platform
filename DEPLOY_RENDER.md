@@ -19,9 +19,9 @@ La configuración detallada, variables de entorno y pasos de n8n está en [SUPAB
 - Build Command: `npm install && npm run build`
 - Start Command: `npm start`
 - Health Check Path: `/health`
-- Variables privadas: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `PORTAL_TOKEN_SECRET`, `VRM_FRONTEND_URL`, `N8N_WEBHOOK_SECRET`, `N8N_BASE_URL`, `ALERTS_WEBHOOK_TOKEN`, `N8N_MANUAL_WEBHOOK_BASE_URL`.
+- Variables privadas: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `PORTAL_TOKEN_SECRET`, `VRM_FRONTEND_URL`, `N8N_WEBHOOK_SECRET`, `N8N_BASE_URL`, `ALERTS_WEBHOOK_TOKEN`, `N8N_MANUAL_WEBHOOK_BASE_URL`, `SLACK_WEBHOOK_URL`.
 
-No expongas variables privadas en el Static Site ni en variables `VITE_*`.
+`SLACK_WEBHOOK_URL` debe ser un Incoming Webhook HTTPS oficial de Slack y permanecer solo en el Web Service de la API. No expongas variables privadas en el Static Site ni en variables `VITE_*`.
 
 ## Blueprint
 

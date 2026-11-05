@@ -5,9 +5,9 @@ permissions:
 
 on:
   push:
-    branches: [master, feature/supabase-integration]
+    branches: [master, feature/supabase-integration, feature/n8n-cloud-compatibility]
   pull_request:
-    branches: [master]
+    branches: [master, feature/supabase-integration]
 
 jobs:
   build:
@@ -26,6 +26,10 @@ jobs:
         run: npm ci
       - name: TypeScript and Vite production build
         run: npm run build
+      - name: Security helper tests
+        run: npm test
+      - name: Validate n8n Cloud compatibility
+        run: npm run validate:n8n-cloud
       - name: Check Express API JavaScript syntax
         run: node --check server.js
       - name: Validate n8n workflows and Code node JavaScript
@@ -103,9 +107,9 @@ jobs:
               if (!reachable.has('Report Manual Completion')) {
                 throw new Error(`${file}: Manual Trigger cannot reach Report Manual Completion`);
               }
-              const completionAuth = reporter.parameters?.headerParameters?.parameters?.find((header) => header.name === 'X-N8N-Signature')?.value;
-              if (!String(completionAuth || '').includes('N8N_WEBHOOK_SECRET')) {
-                throw new Error(`${file}: completion callback must use N8N_WEBHOOK_SECRET`);
+              const completionCredential = reporter.credentials?.httpHeaderAuth?.name;
+              if (completionCredential !== 'VRM Backend Callback Auth') {
+                throw new Error(`${file}: completion callback must use VRM Backend Callback Auth`);
               }
               if (code === 'wf-06') {
                 const alertReporter = nodes.find((node) => node.name === 'Report Alert Delivery');
@@ -113,8 +117,8 @@ jobs:
                 if (!alertReporter || !String(alertReporter.parameters?.url || '').includes('/api/v1/webhooks/n8n/alert-dispatched')) {
                   throw new Error(`${file}: alert delivery callback is missing or misconfigured`);
                 }
-                if (!String(alertReporter.parameters?.headerParameters?.parameters?.find((header) => header.name === 'X-N8N-Signature')?.value || '').includes('N8N_WEBHOOK_SECRET')) {
-                  throw new Error(`${file}: alert delivery callback must use N8N_WEBHOOK_SECRET`);
+                if (alertReporter.credentials?.httpHeaderAuth?.name !== 'VRM Backend Callback Auth') {
+                  throw new Error(`${file}: alert delivery callback must use VRM Backend Callback Auth`);
                 }
                 for (const builder of alertBuilders) {
                   const targets = Object.values(workflow.connections?.[builder.name] || {})

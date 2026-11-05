@@ -70,49 +70,38 @@
     },
     {
       "parameters": {
-        "jsCode": "const crypto = require('crypto');\nconst secret = $env.PORTAL_TOKEN_SECRET;\nif (!secret || secret.length < 32) throw new Error('PORTAL_TOKEN_SECRET debe configurarse con al menos 32 caracteres aleatorios.');\nconst base = String($env.VRM_PORTAL_URL || '').replace(/\\/$/, '');\nif (!base) throw new Error('VRM_PORTAL_URL debe apuntar a la URL pública del frontend terminada en /portal.');\nconst due = $('Find Due Vendors').all().map(i => i.json);\nreturn $input.all().map(it => {\n  const a = it.json;\n  const v = due.find(d => d.id === a.vendor_id) || {};\n  const payload = Buffer.from(JSON.stringify({\n    aid: a.assessment_id, vid: a.vendor_id, exp: Date.now() + 30 * 86400000\n  })).toString('base64url');\n  const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');\n  return { json: {\n    vendor_id: a.vendor_id, assessment_id: a.assessment_id, legal_name: v.legal_name,\n    email: v.email || null, link: base + '/assessment/' + payload + '.' + sig\n  }};\n});"
-      },
-      "id": "link",
-      "name": "Sign Portal Link",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        940,
-        300
-      ]
-    },
-    {
-      "parameters": {
         "method": "POST",
-        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/assessment-created",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-N8N-Signature",
-              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
-            }
-          ]
-        },
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/assessment-link",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ vendor_id: $json.vendor_id, assessment_id: $json.assessment_id, email: $json.email, link: $json.link }) }}",
+        "jsonBody": "={{ JSON.stringify({ assessment_id: $json.assessment_id, vendor_id: $json.vendor_id }) }}",
         "options": {
-          "timeout": 10000
-        }
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
-      "id": "notify",
-      "name": "Notify Backend (envío email)",
+      "id": "link",
+      "name": "Sign Portal Link",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1180,
+        940,
         300
       ],
-      "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
     },
     {
       "parameters": {
@@ -140,7 +129,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const escapeHtml = (value) => String(value || '').replace(/[&<>\"']/g, (c) => ({\n  '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'\n}[c]));\nreturn $('Sign Portal Link').all()\n  .map(entry => entry.json)\n  .map(item => ({\n    json: {\n      email_present: Boolean(item.email && item.link),\n      to: item.email || '',\n      subject: 'Evaluación de seguridad de proveedores - VRM',\n      html: '<div style=\"font-family:Arial,sans-serif;max-width:640px;margin:auto;padding:24px;color:#0f172a\">' +\n        '<h2>Evaluación de seguridad de proveedores</h2>' +\n        '<p>Hola,</p>' +\n        '<p>Se solicita completar la evaluación de seguridad de <strong>' + escapeHtml(item.legal_name) + '</strong>.</p>' +\n        '<p>Utiliza el siguiente enlace seguro, válido durante 30 días y de un solo uso:</p>' +\n        '<p><a href=\"' + escapeHtml(item.link) + '\" style=\"display:inline-block;padding:12px 18px;background:#0891b2;color:#fff;text-decoration:none;border-radius:6px\">Completar evaluación</a></p>' +\n        '<p style=\"font-size:12px;color:#64748b\">Si no esperabas esta solicitud, contacta al equipo responsable de gestión de proveedores.</p>' +\n        '</div>'\n    }\n  }));"
+        "jsCode": "const escapeHtml = (value) => String(value || '').replace(/[&<>\"']/g, (c) => ({\n  '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;'\n}[c]));\nreturn $('Sign Portal Link').all()\n  .map(entry => entry.json.body || entry.json)\n  .map(item => ({\n    json: {\n      email_present: Boolean(item.email && item.link),\n      to: item.email || '',\n      subject: 'Evaluación de seguridad de proveedores - VRM',\n      html: '<div style=\"font-family:Arial,sans-serif;max-width:640px;margin:auto;padding:24px;color:#0f172a\">' +\n        '<h2>Evaluación de seguridad de proveedores</h2>' +\n        '<p>Hola,</p>' +\n        '<p>Se solicita completar la evaluación de seguridad de <strong>' + escapeHtml(item.legal_name) + '</strong>.</p>' +\n        '<p>Utiliza el siguiente enlace seguro, válido durante 30 días y de un solo uso:</p>' +\n        '<p><a href=\"' + escapeHtml(item.link) + '\" style=\"display:inline-block;padding:12px 18px;background:#0891b2;color:#fff;text-decoration:none;border-radius:6px\">Completar evaluación</a></p>' +\n        '<p style=\"font-size:12px;color:#64748b\">Si no esperabas esta solicitud, contacta al equipo responsable de gestión de proveedores.</p>' +\n        '</div>'\n    }\n  }));"
       },
       "id": "prepare-invitation",
       "name": "Prepare Invitation Email",
@@ -153,7 +142,7 @@
     },
     {
       "parameters": {
-        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "fromEmail": "={{ $vars.SMTP_FROM }}",
         "toEmail": "={{ $json.to }}",
         "subject": "={{ $json.subject }}",
         "emailFormat": "html",
@@ -268,7 +257,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst due = $('Find Due Vendors').all().map(item => item.json).filter(item => item.id);\nconst signed = $('Sign Portal Link').isExecuted ? $('Sign Portal Link').all().map(item => item.json) : [];\nconst expectedEmails = signed.filter(item => item.email && item.link).length;\nconst missingEmails = Math.max(0, signed.length - expectedEmails);\nconst inputErrors = $input.all().some(item => Boolean(item.json?.error || item.json?.errorMessage));\nconst emailNode = $('Send Invitation Email');\nconst emailResults = emailNode.isExecuted ? emailNode.all() : [];\nconst sentEmails = inputErrors ? 0 : emailResults.length;\nconst status = inputErrors ? 'failed' : missingEmails > 0 ? 'partial' : 'success';\nlet summary;\nif (due.length === 0) summary = 'No había proveedores con reevaluación vencida.';\nelse if (inputErrors) summary = 'Se crearon ' + signed.length + ' evaluación(es), pero falló la entrega de correo.';\nelse summary = 'Evaluaciones creadas: ' + signed.length + '; correos enviados: ' + sentEmails + '; contactos sin email: ' + missingEmails + '.';\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-05',\n  status,\n  summary,\n  details: { due_vendors: due.length, invitations_created: signed.length, emails_expected: expectedEmails, emails_sent: sentEmails, missing_contact_emails: missingEmails, email_error: inputErrors }\n} }];"
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\n\nconst due = $('Find Due Vendors').all().map(item => item.json).filter(item => item.id);\nconst signNode = $('Sign Portal Link');\nconst signed = signNode.isExecuted ? signNode.all().map(item => item.json.body || item.json) : [];\nconst signErrors = signed.filter(item => item.error || Number(item.statusCode || 0) >= 400 || item.body?.error).length;\nconst validSigned = signed.filter(item => !item.error && !item.body?.error && item.assessment_id && item.link);\nconst expectedEmails = validSigned.filter(item => item.email).length;\nconst missingEmails = validSigned.filter(item => !item.email).length;\n\nconst emailNode = $('Send Invitation Email');\nconst emailResults = emailNode.isExecuted ? emailNode.all() : [];\nconst emailErrors = emailResults.some(item =>\n  Boolean(item.json?.error || item.json?.errorMessage || item.json?.error?.message)\n);\nconst upstreamErrors = $input.all().some(item =>\n  Boolean(item.json?.error || item.json?.errorMessage || item.json?.body?.error)\n);\nconst inputErrors = signErrors > 0 || emailErrors || upstreamErrors;\nconst sentEmails = emailResults.filter(item =>\n  !item.json?.error && !item.json?.errorMessage && !item.json?.error?.message\n).length;\nconst status = inputErrors ? 'failed' : missingEmails > 0 ? 'partial' : 'success';\n\nlet summary;\nif (due.length === 0) summary = 'No había proveedores con reevaluación vencida.';\nelse if (signErrors > 0) summary = 'No se pudieron firmar ' + signErrors + ' enlace(s) de evaluación.';\nelse if (emailErrors || upstreamErrors) summary = 'Se crearon ' + validSigned.length + ' evaluación(es), pero falló la entrega de correo.';\nelse summary = 'Evaluaciones creadas: ' + validSigned.length + '; correos enviados: ' + sentEmails + '; contactos sin email: ' + missingEmails + '.';\n\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-05',\n  status,\n  summary,\n  details: {\n    due_vendors: due.length,\n    invitations_created: validSigned.length,\n    signing_errors: signErrors,\n    emails_expected: expectedEmails,\n    emails_sent: sentEmails,\n    email_errors: emailErrors || upstreamErrors,\n    missing_contact_emails: missingEmails\n  }\n} }];"
       },
       "id": "manual-completion-code-wf-05",
       "name": "Build Manual Completion",
@@ -282,23 +271,16 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-N8N-Signature",
-              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
-            }
-          ]
-        },
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
           "timeout": 10000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "manual-completion-http-wf-05",
       "name": "Report Manual Completion",
@@ -308,7 +290,13 @@
         2620,
         520
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
     }
   ],
   "connections": {
@@ -349,7 +337,7 @@
       "main": [
         [
           {
-            "node": "Notify Backend (envío email)",
+            "node": "Prepare Invitation Email",
             "type": "main",
             "index": 0
           }
@@ -361,17 +349,6 @@
         [
           {
             "node": "Expire Old Assessments",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Notify Backend (envío email)": {
-      "main": [
-        [
-          {
-            "node": "Prepare Invitation Email",
             "type": "main",
             "index": 0
           }

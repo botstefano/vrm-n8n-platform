@@ -5,6 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
 import net from 'node:net';
+import tls from 'node:tls';
+import { resolvePublicHost } from './server/host-security.js';
 import { createClient } from '@supabase/supabase-js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -293,6 +295,89 @@ async function recalculateVendorScore(vendorId) {
   return { score, risk };
 }
 
+
+function probeTlsCertificate(host, port, address) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let socket;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (socket && !socket.destroyed) socket.destroy();
+      resolve(result);
+    };
+    try {
+      socket = tls.connect({
+        host: address,
+        port,
+        rejectUnauthorized: false,
+        ...(net.isIP(host) ? {} : { servername: host })
+      }, () => {
+        const certificate = socket.getPeerCertificate();
+        finish({ ok: Boolean(certificate && certificate.valid_to), certificate });
+      });
+      socket.setTimeout(10000, () => finish({ ok: false, error: 'timeout' }));
+      socket.on('error', (error) => finish({ ok: false, error: String(error.message || error).slice(0, 250) }));
+    } catch (error) {
+      finish({ ok: false, error: String(error.message || error).slice(0, 250) });
+    }
+  });
+}
+
+async function scanVendorTls(vendor) {
+  const result = { vendor_id: vendor.id, legal_name: vendor.legal_name, checked: false, blocked: false, finding: null };
+  if (!vendor.website) return { ...result, error: 'missing_website' };
+  let host;
+  let port;
+  try {
+    const website = String(vendor.website);
+    const url = new URL(website.startsWith('http://') || website.startsWith('https://') ? website : 'https://' + website);
+    host = url.hostname.toLowerCase();
+    if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+    port = Number(url.port) || 443;
+  } catch {
+    return { ...result, error: 'invalid_website' };
+  }
+
+  const resolution = await resolvePublicHost(host);
+  if (!resolution.ok) {
+    return { ...result, host, blocked: ['private_or_reserved','local_host'].includes(resolution.reason), error: resolution.reason };
+  }
+
+  const probe = await probeTlsCertificate(host, port, resolution.ip);
+  if (!probe.ok) return { ...result, host, port, error: probe.error || 'tls_probe_failed' };
+
+  const certificate = probe.certificate;
+  const notAfter = new Date(certificate.valid_to);
+  if (Number.isNaN(notAfter.getTime())) return { ...result, host, port, error: 'invalid_certificate_expiry' };
+  const daysLeft = Math.floor((notAfter.getTime() - Date.now()) / 86400000);
+  const severity = daysLeft < 7 ? 'critical' : daysLeft < 30 ? 'high' : daysLeft < 60 ? 'medium' : null;
+  const issuer = (certificate.issuer && (certificate.issuer.O || certificate.issuer.CN)) || 'n/a';
+  const finding = severity ? {
+    vendor_id: vendor.id,
+    source: 'tls_expiry',
+    source_ref: 'tls:' + host + ':' + port + ':' + notAfter.toISOString().slice(0, 10),
+    title: daysLeft < 0 ? 'Certificado TLS EXPIRADO (' + host + ')'
+      : 'Certificado TLS expira en ' + daysLeft + ' días (' + host + ')',
+    description: 'Emisor: ' + issuer + ' · Válido hasta ' + notAfter.toISOString(),
+    severity,
+    evidence: {
+      host, port, ip: resolution.ip, days_left: daysLeft, issuer,
+      not_after: notAfter.toISOString(),
+      subject: certificate.subject && certificate.subject.CN
+    }
+  } : null;
+  return { ...result, host, port, checked: true, finding };
+}
+
+async function runWithConcurrency(items, limit, worker) {
+  const results = [];
+  for (let index = 0; index < items.length; index += limit) {
+    results.push(...await Promise.all(items.slice(index, index + limit).map(worker)));
+  }
+  return results;
+}
+
 async function dispatchAlertRecord(payload, reqUser = null) {
   const severity = ['critical', 'high', 'medium', 'low', 'info'].includes(payload.severity) ? payload.severity : 'medium';
   const route = ['critical', 'high'].includes(severity) ? 'slack+email' : 'slack';
@@ -305,7 +390,7 @@ async function dispatchAlertRecord(payload, reqUser = null) {
   const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const { data: duplicate, error: duplicateError } = await supabase
     .from('alert_notifications').select('id').eq('fingerprint', fingerprint).gt('created_at', cutoff)
-    .in('delivery_status', ['sent','deduped']).limit(1);
+    .in('delivery_status', ['pending','sent','deduped']).limit(1);
   if (duplicateError) throw duplicateError;
   const deduped = (duplicate || []).length > 0;
   const row = {
@@ -344,6 +429,148 @@ async function dispatchAlertRecord(payload, reqUser = null) {
   }
   return { ...data, delivery_status: finalDeliveryStatus, status: finalDeliveryStatus, timestamp: data.created_at, vendor_name: null, email_subject: null, email_html: null, slack_text: null };
 }
+
+
+/* Private n8n endpoints. Network probing and signing run in Render, not in n8n Cloud Code nodes. */
+app.post('/api/v1/webhooks/n8n/resolve-host', requireDatabase, verifyN8nSignature, async (req, res, next) => {
+  try {
+    const host = String(req.body?.host || '');
+    if (!host) return res.status(400).json({ error: 'host es obligatorio.' });
+    const result = await resolvePublicHost(host);
+    res.json({
+      vendor_id: req.body?.vendor_id || null,
+      host: result.host || host,
+      ip: result.ok ? result.ip : null,
+      skip: !result.ok,
+      skip_reason: result.ok ? null : result.reason
+    });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/webhooks/n8n/tls-scan', requireDatabase, verifyN8nSignature, async (_req, res, next) => {
+  try {
+    const { data: vendors, error } = await supabase.from('vendors')
+      .select('id,legal_name,website')
+      .in('status', ['approved','conditional','monitoring','incident','reevaluation'])
+      .not('website', 'is', null);
+    if (error) throw error;
+
+    const targets = vendors || [];
+    const results = await runWithConcurrency(targets, 5, scanVendorTls);
+    const findings = results.filter((item) => item.finding).map((item) => item.finding);
+    const meta = {
+      total: targets.length,
+      checked: results.filter((item) => item.checked).length,
+      failed: results.filter((item) => Boolean(item.error) && !item.blocked).length,
+      blocked: results.filter((item) => item.blocked).length,
+      findings: findings.length
+    };
+    const status = meta.checked === 0 && meta.failed > 0 ? 'error' : meta.failed > 0 ? 'partial' : 'ok';
+    res.json({
+      findings,
+      summary: {
+        kind: 'summary',
+        job_type: 'tls_expiry',
+        interval_min: 1440,
+        status,
+        last_run: new Date().toISOString(),
+        meta
+      }
+    });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/webhooks/n8n/assessment-link', requireDatabase, verifyN8nSignature, async (req, res, next) => {
+  try {
+    const assessmentId = String(req.body?.assessment_id || '');
+    const vendorId = String(req.body?.vendor_id || '');
+    if (!assessmentId || !vendorId) {
+      return res.status(400).json({ error: 'assessment_id y vendor_id son obligatorios.' });
+    }
+    const [{ data: assessment, error: assessmentError }, { data: vendor, error: vendorError }] = await Promise.all([
+      supabase.from('assessments').select('id,vendor_id,status')
+        .eq('id', assessmentId).eq('vendor_id', vendorId).maybeSingle(),
+      supabase.from('vendors').select('id,legal_name,primary_contact')
+        .eq('id', vendorId).maybeSingle()
+    ]);
+    if (assessmentError) throw assessmentError;
+    if (vendorError) throw vendorError;
+    if (!assessment || !vendor) return res.status(404).json({ error: 'No se encontró el proveedor o la evaluación.' });
+    if (!['pending','in_progress'].includes(assessment.status)) {
+      return res.status(409).json({ error: 'La evaluación no admite nuevas invitaciones.' });
+    }
+
+    const frontendBase = (FRONTEND_ORIGINS[0] || process.env.VRM_FRONTEND_URL || '').replace(/\/$/, '');
+    if (!frontendBase) return res.status(503).json({ error: 'VRM_FRONTEND_URL no está configurada en Render.' });
+    const portal = createPortalToken({ aid: assessment.id, vid: vendor.id, exp: Date.now() + 30 * 86400000 });
+    const { data: tokenizedAssessment, error: updateError } = await supabase.from('assessments').update({
+      portal_token_hash: portal.hash,
+      token_expires_at: portal.expiresAt
+    }).eq('id', assessment.id).eq('vendor_id', vendor.id)
+      .in('status', ['pending','in_progress']).select('id').maybeSingle();
+    if (updateError) throw updateError;
+    if (!tokenizedAssessment) return res.status(409).json({ error: 'La evaluación cambió de estado y no se pudo registrar el enlace.' });
+
+    const link = frontendBase + '/portal/assessment/' + portal.token;
+    const { error: auditError } = await supabase.from('audit_log').insert({
+      actor: 'n8n',
+      action: 'assessment_invitation_prepared',
+      entity: 'assessments',
+      entity_id: assessment.id,
+      details: { vendor_id: vendor.id, email_present: Boolean(vendor.primary_contact?.email), link_registered: true }
+    });
+    if (auditError) throw auditError;
+
+    res.json({
+      assessment_id: assessment.id,
+      vendor_id: vendor.id,
+      legal_name: vendor.legal_name,
+      email: vendor.primary_contact?.email || null,
+      link,
+      expires_at: portal.expiresAt
+    });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/webhooks/n8n/alert-request', requireDatabase, verifyN8nSignature, async (req, res, next) => {
+  try {
+    const alert = await dispatchAlertRecord(req.body || {});
+    res.json({
+      accepted: true,
+      alert_id: alert.id,
+      delivery_status: alert.delivery_status || alert.status || 'pending'
+    });
+  } catch (error) { next(error); }
+});
+
+app.post('/api/v1/webhooks/n8n/slack-delivery', requireDatabase, verifyN8nSignature, async (req, res, next) => {
+  try {
+    const webhookUrl = process.env.SLACK_WEBHOOK_URL || '';
+    if (!webhookUrl) return res.status(503).json({ error: 'SLACK_WEBHOOK_URL no está configurada en Render.' });
+    let parsedUrl;
+    try { parsedUrl = new URL(webhookUrl); } catch {
+      return res.status(503).json({ error: 'SLACK_WEBHOOK_URL no es una URL válida.' });
+    }
+    if (parsedUrl.protocol !== 'https:' || !['hooks.slack.com','hooks.slack-gov.com'].includes(parsedUrl.hostname)) {
+      return res.status(503).json({ error: 'SLACK_WEBHOOK_URL debe ser un webhook HTTPS oficial de Slack.' });
+    }
+    const message = String(req.body?.text || '');
+    if (!message || message.length > 5000) {
+      return res.status(400).json({ error: 'text es obligatorio y no puede superar 5000 caracteres.' });
+    }
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: message }),
+      signal: AbortSignal.timeout(15000)
+    });
+    const responseText = await response.text();
+    if (!response.ok || responseText.trim().toLowerCase() !== 'ok') {
+      return res.status(502).json({ error: 'Slack no confirmó la entrega del mensaje.' });
+    }
+    res.json({ sent: true });
+  } catch (error) { next(error); }
+});
 
 // Portal público de proveedores: acceso únicamente mediante enlace HMAC firmado, vigente y de un solo uso.
 app.get('/api/public/assessments/:token', requireDatabase, async (req, res, next) => {
@@ -433,12 +660,24 @@ app.post('/api/v1/webhooks/n8n/findings-created', requireDatabase, verifyN8nSign
   try {
     const body = req.body || {};
     if (body.vendor_id) await recalculateVendorScore(body.vendor_id);
-    await supabase.from('audit_log').insert({
+    const { error: auditError } = await supabase.from('audit_log').insert({
       actor: 'n8n', action: 'finding_ingested', entity: 'vendor_findings',
       entity_id: String(body.finding_id || body.source_ref || ''),
       details: { vendor_id: body.vendor_id, source: body.source, severity: body.severity, title: body.title }
     });
-    res.json({ received: true, scorecardUpdated: Boolean(body.vendor_id) });
+    if (auditError) throw auditError;
+    let alert = null;
+    if (body.vendor_id && ['critical','high'].includes(body.severity)) {
+      alert = await dispatchAlertRecord({
+        severity: body.severity,
+        title: body.title || 'Hallazgo de seguridad',
+        vendor_id: body.vendor_id,
+        source: body.source || 'n8n',
+        source_ref: body.source_ref || body.finding_id,
+        description: body.description || ''
+      });
+    }
+    res.json({ received: true, scorecardUpdated: Boolean(body.vendor_id), alertId: alert?.id || null, alertStatus: alert?.delivery_status || null });
   } catch (error) { next(error); }
 });
 

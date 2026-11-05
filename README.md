@@ -8,7 +8,7 @@ Plataforma de gestión continua del riesgo de proveedores (Vendor Risk Managemen
 - **Autenticación:** Supabase Auth.
 - **API:** Express, validación JWT y control de acceso basado en roles (RBAC).
 - **Persistencia:** PostgreSQL administrado por Supabase.
-- **Automatización:** 11 workflows n8n exportados en `automation/n8n/workflows/`.
+- **Automatización:** 11 workflows n8n exportados en `automation/n8n/workflows/`, compatibles con n8n Cloud; las tareas de TLS/DNS y firma HMAC se ejecutan de forma segura en la API.
 - **Despliegue:** Static Site para el frontend y Web Service independiente para la API en Render.
 
 La API utiliza la Secret key de Supabase exclusivamente en servidor. El navegador usa la Publishable key y no recibe privilegios de servicio. Las tablas tienen RLS habilitado; las operaciones de negocio pasan por la API después de validar la sesión y los roles.
@@ -64,4 +64,4 @@ La guía de configuración completa está en [SUPABASE_RENDER_SETUP.md](./SUPABA
 
 No incluyas claves secretas, contraseñas de PostgreSQL ni tokens privados en GitHub o en variables `VITE_*`. La Secret key de Supabase debe permanecer solo en el entorno del backend.
 
-El portal público de proveedores valida enlaces HMAC firmados con expiración y un solo uso; el proveedor responde sin iniciar sesión en el panel administrativo. Las ejecuciones manuales WF-01 a WF-10 se correlacionan mediante un `request_id` y reportan su resultado final al backend mediante un callback autenticado con un secreto compartido; el panel actualiza el historial mientras haya ejecuciones en curso. Si un workflow termina abruptamente antes del callback, revisa WF-00 y los registros de n8n. La integración de servicios externos depende de las credenciales reales configuradas en Render, Supabase y n8n.
+El portal público de proveedores valida enlaces HMAC firmados con expiración y un solo uso; el proveedor responde sin iniciar sesión en el panel administrativo. Las ejecuciones manuales WF-01 a WF-10 se correlacionan mediante un `request_id` y reportan su resultado final al backend mediante un callback autenticado con un secreto compartido; el panel actualiza el historial mientras haya ejecuciones en curso. Si un workflow termina abruptamente antes del callback, revisa WF-00 y los registros de n8n. La integración de servicios externos depende de las credenciales reales configuradas en Render, Supabase y n8n. Los escaneos TLS y la resolución DNS se ejecutan en el backend para evitar módulos Node.js no disponibles en n8n Cloud. La deduplicación de alertas se centraliza en PostgreSQL y no requiere Redis.

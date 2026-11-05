@@ -47,6 +47,7 @@ Variables de entorno de la API:
 | `N8N_BASE_URL` | URL base de n8n, sin `/webhook/vrm-alerts` |
 | `ALERTS_WEBHOOK_TOKEN` | Valor del header configurado para autenticar webhooks de alertas en n8n |
 | `N8N_MANUAL_WEBHOOK_BASE_URL` | URL completa hasta `/webhook/vrm-manual` |
+| `SLACK_WEBHOOK_URL` | Incoming Webhook HTTPS del canal de alertas; solo en el backend |
 
 Opcionales:
 
@@ -81,46 +82,67 @@ Asigna `admin` solo a la cuenta administradora inicial. Para el resto de cuentas
 
 Para el backend, copia el Project URL y la Secret key desde Project Settings / API Keys. La Secret key mapea a `service_role`, omite RLS y solo debe estar en el Web Service privado después de las validaciones de sesión y RBAC. No compartas esas credenciales en tickets, capturas o commits.
 
-## 3. n8n y workflows
+## 3. n8n Cloud y workflows
 
-Importa o actualiza los JSON de `automation/n8n/workflows/` en n8n. Los workflows WF-01 a WF-10 contienen un webhook manual adicional con una ruta `vrm-manual/wf-XX`. WF-00 se mantiene como manejador global de errores y se ejecuta por evento, no manualmente. WF-05 expira invitaciones que superaron los 30 días y permite generar una nueva evaluación. Activa los workflows después de configurar y validar sus credenciales.
+La rama incorpora workflows compatibles con n8n Cloud. Importa o actualiza los 11 JSON de `automation/n8n/workflows/` después de integrar esta rama. WF-00 funciona por evento; WF-01 a WF-10 tienen además un webhook manual autenticado `vrm-manual/wf-XX`.
 
-Crea/configura en n8n:
+**Importante:** los JSON se exportan con `active: false`. No se ejecutan por el simple hecho de importarlos. Primero configura variables y credenciales, prueba los disparadores manuales y después activa los workflows que correspondan.
 
-1. Credencial PostgreSQL llamada `Postgres VRM`, apuntando a la base PostgreSQL del proyecto Supabase. Usa los datos de conexión que entrega el botón Connect de Supabase. Si el host Direct no es accesible desde el entorno de n8n, utiliza Session Pooler y la cadena/puerto que proporciona Supabase.
-2. Credencial de Header Auth llamada `VRM Alerts Webhook Auth`, con el mismo valor que `ALERTS_WEBHOOK_TOKEN` y el nombre de header que el workflow WF-06 espera (`X-Alert-Token`).
-3. Configura las credenciales referenciadas por los nodos de NVD, Shodan, Redis y SMTP. Para WF-05, configura `SMTP VRM` y `SMTP_FROM`; el nodo de invitación solo envía correo cuando el proveedor tiene un email de contacto. El correo se envía después de que la API registre el hash del enlace firmado en Supabase.
+### Vincular el gestor global de errores
 
-WF-01 consulta NVD con páginas de hasta 2.000 resultados mediante `startIndex`, limita cada tecnología a 50 páginas y separa las peticiones 6 segundos para respetar los límites de la API. Si se alcanza ese límite sin recuperar todos los resultados, el job queda como `partial` y no avanza la ventana de sincronización.
-4. Configura en el entorno de n8n `N8N_WEBHOOK_SECRET`, `PORTAL_TOKEN_SECRET`, `VRM_PORTAL_URL`, `VRM_BACKEND_URL`, `N8N_BASE_URL`, `SMTP_FROM` y las demás variables que utilicen los workflows. `N8N_WEBHOOK_SECRET` debe coincidir con el valor de Render y n8n lo envía al backend en el header `X-N8N-Signature` como secreto compartido de autenticación; utiliza un secreto aleatorio de al menos 32 caracteres. `PORTAL_TOKEN_SECRET` debe coincidir exactamente entre n8n y la API de Render y tener al menos 32 caracteres aleatorios. Usa valores distintos para ambos secretos. `VRM_PORTAL_URL` es obligatoria y debe ser la URL pública del frontend terminada en `/portal`; WF-05 se detiene sin generar invitaciones si no está configurada. `VRM_BACKEND_URL` es la URL base del Web Service Express. Como estos workflows utilizan variables y módulos nativos desde los Code nodes, en una instancia n8n autogestionada configura `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` y `NODE_FUNCTION_ALLOW_BUILTIN=crypto,tls,dns,net`, revisando antes las implicaciones de seguridad de permitir acceso a esas variables.
+Después de importar y guardar **WF-00 Global Error Handler**, asígnalo como gestor de errores de cada workflow operativo:
 
-Variables adicionales usadas por los workflows de n8n:
+1. Abre **WF-01** y entra en el menú del workflow (esquina superior derecha) → **Settings**.
+2. En **Error Workflow**, selecciona **WF-00 Global Error Handler** y guarda.
+3. Repite el procedimiento para **WF-02** hasta **WF-10**.
 
-| Variable | Uso |
+Este vínculo se configura en la instancia de n8n después de importar los JSON, porque el identificador interno de WF-00 lo genera n8n. WF-00 debe comenzar con el nodo **Error Trigger**, como ya está definido en el archivo del repositorio. n8n permite reutilizar el mismo workflow de errores para varios workflows; no necesitas crear diez gestores distintos.
+
+### Credenciales que debes crear o seleccionar en n8n
+
+1. **Postgres VRM** — credencial PostgreSQL que apunte a la base Supabase. Usa los datos de Connect de Supabase. Si n8n Cloud no alcanza el host Direct, utiliza Session Pooler y el host/puerto proporcionados por Supabase.
+2. **VRM Alerts Webhook Auth** — tipo Header Auth; nombre del header `X-Alert-Token`; valor idéntico a `ALERTS_WEBHOOK_TOKEN` configurado en Render. Así se protegen los webhooks entrantes y los disparadores manuales.
+3. **VRM Backend Callback Auth** — tipo Header Auth; nombre del header `X-N8N-Signature`; valor idéntico a `N8N_WEBHOOK_SECRET` configurado en Render. Así se autentican los callbacks y las llamadas internas a la API.
+4. **NVD API** — credencial **Header Auth**; nombre del header `apiKey`; valor: tu clave de NVD. El nodo NVD la envía como encabezado HTTP.
+5. **Shodan API** — credencial HTTP Query Auth con el parámetro `key` y tu API key de Shodan.
+6. **SMTP VRM** — servidor SMTP y remitente para invitaciones y resúmenes.
+
+Al importar, revisa los nodos HTTP Request y selecciona la credencial indicada en cada uno si n8n no la vinculó automáticamente. No escribas los secretos directamente en parámetros, expresiones, Code nodes ni archivos JSON.
+
+**Redis ya no es necesario.** La deduplicación de alertas ahora se centraliza en `alert_notifications` de PostgreSQL, evitando tener dos mecanismos independientes.
+
+### Variables personalizadas no sensibles
+
+En la pestaña **Variables** de n8n, crea estas variables globales (o con alcance al proyecto donde estén los workflows):
+
+| Key | Valor |
 |---|---|
-| `SLACK_WEBHOOK_URL` | Incoming Webhook del canal de alertas |
-| `ALERT_FALLBACK_EMAIL` | Destinatario alternativo obligatorio para alertas críticas/altas si no hay usuarios RBAC activos |
-| `SMTP_FROM` | Dirección remitente usada por los nodos SMTP |
-| `NVD_MIN_CVSS` | Umbral CVSS (por defecto 7) |
-| `CT_LOOKBACK_DAYS` | Ventana de búsqueda de certificados (por defecto 3 días) |
-| `WORKFLOW_STALE_HOURS` | Marca como fallidas las ejecuciones manuales sin callback después de este plazo (12 horas por defecto) |
-| `STALE_FINDING_DAYS` | Antigüedad para cierre de hallazgos obsoletos |
-| `AUDIT_RETENTION_YEARS` | Retención del log de auditoría |
-| `SCORE_RETENTION_YEARS` | Retención del histórico de puntuaciones |
-| `VRM_FRONTEND_URL` | Origen público del frontend, usado para enlaces en alertas |
-| `VRM_PORTAL_URL` | URL del frontend terminada en `/portal`, usada por WF-05 |
+| `VRM_BACKEND_URL` | URL de `vrm-platform-api` en Render, sin barra final |
+| `VRM_FRONTEND_URL` | URL pública del frontend, sin barra final |
+| `NVD_MIN_CVSS` | `7` |
+| `CT_LOOKBACK_DAYS` | `3` |
+| `WORKFLOW_STALE_HOURS` | `12` |
+| `STALE_FINDING_DAYS` | `90` |
+| `AUDIT_RETENTION_YEARS` | `5` |
+| `SCORE_RETENTION_YEARS` | `2` |
+| `ALERT_FALLBACK_EMAIL` | Correo alternativo para alertas críticas/altas si no hay destinatarios RBAC |
+| `SMTP_FROM` | Remitente configurado en tu SMTP |
 
-`N8N_BLOCK_ENV_ACCESS_IN_NODE=false` y `NODE_FUNCTION_ALLOW_BUILTIN=crypto,tls,dns,net` son necesarios para que los Code nodes actuales puedan leer variables del entorno y cargar los módulos nativos usados por los workflows. Configúralos solo en una instancia n8n que administres y protege el acceso a su editor y a sus workflows.
+El código usa la sintaxis `$vars.NOMBRE`. Las variables personalizadas son para configuración no sensible; los tokens y las claves de servicios deben estar en Credentials o en Render.
 
-En Render:
+No crees en n8n Variables `N8N_WEBHOOK_SECRET`, `ALERTS_WEBHOOK_TOKEN`, `PORTAL_TOKEN_SECRET`, `SLACK_WEBHOOK_URL` ni la clave de Shodan.
 
-- `N8N_BASE_URL`: URL base de tu instancia n8n.
-- `PORTAL_TOKEN_SECRET`: usa el mismo valor secreto que configuraste en n8n para firmar los enlaces del portal.
-- `N8N_MANUAL_WEBHOOK_BASE_URL`: por ejemplo `https://tu-n8n.example.com/webhook/vrm-manual` (sustituye por la URL real).
-- `ALERTS_WEBHOOK_TOKEN`: debe coincidir con la credencial Header Auth de n8n.
-- `N8N_WEBHOOK_SECRET`: debe coincidir con la variable configurada en n8n.
+### Qué ejecuta cada entorno
 
-No inventes los hosts, puertos ni nombres de conexión: copia los datos de Connect en Supabase y de tu propia instancia n8n.
+- **WF-03 TLS:** n8n solicita `POST /api/v1/webhooks/n8n/tls-scan`. La API de Render realiza la resolución DNS y la negociación TLS sobre una IP pública ya validada; n8n recibe los resultados y conserva la responsabilidad de persistir los hallazgos y el estado del job.
+- **WF-04 Shodan:** la API de Render valida la resolución DNS mediante `POST /api/v1/webhooks/n8n/resolve-host`. n8n consulta Shodan usando la credencial `Shodan API` y procesa los banners/puertos.
+- **WF-05 Reevaluaciones:** la API firma el enlace HMAC y registra su hash mediante `POST /api/v1/webhooks/n8n/assessment-link`. `PORTAL_TOKEN_SECRET` permanece exclusivamente en Render.
+- **WF-06 Alertas:** Slack se envía mediante `POST /api/v1/webhooks/n8n/slack-delivery`; la URL secreta del Incoming Webhook permanece en Render. El correo sigue usando `SMTP VRM`.
+- **WF-00 y WF-01 a WF-04, WF-07 y WF-08:** solicitan el despacho de alertas mediante `POST /api/v1/webhooks/n8n/alert-request`. La API registra y deduplica la notificación y luego invoca WF-06.
+
+El backend mantiene `N8N_BASE_URL`, `ALERTS_WEBHOOK_TOKEN`, `N8N_WEBHOOK_SECRET` y `SLACK_WEBHOOK_URL` como variables privadas de Render. La clave HMAC del portal `PORTAL_TOKEN_SECRET` también permanece solo en Render. No se requiere habilitar acceso a variables de entorno ni módulos Node.js en Code nodes de n8n Cloud.
+
+WF-01 mantiene paginación NVD de hasta 2.000 resultados por página, máximo 50 páginas por tecnología e intervalo de 6 segundos entre peticiones. Si el límite no permite recuperar todos los resultados, el job debe quedar como `partial`.
 
 ## 4. Primera prueba
 
@@ -132,7 +154,7 @@ No inventes los hosts, puertos ni nombres de conexión: copia los datos de Conne
 6. Crea un proveedor de prueba con email de contacto y fecha de evaluación vencida, ejecuta WF-05 desde la pantalla Evaluaciones y confirma que el correo contiene un enlace público `/portal/assessment/...`.
 7. Abre el enlace en una ventana privada, responde todas las preguntas y envíalo. Verifica que la evaluación pasa a `completed`, se registra la puntuación y un segundo uso del enlace es rechazado.
 8. Comprueba que un usuario `risk_analyst` no puede ejecutar WF-10 y que un usuario `admin` sí puede solicitarlo.
-9. Ejecuta WF-06 desde el formulario de prueba del Centro de Alertas y confirma que la fila correspondiente aparece en `public.alert_notifications` con su estado de entrega. Los hallazgos críticos/altos generados por WF-01 a WF-04 también deben aparecer en el Centro de Alertas; el callback de n8n los registra en Supabase. La ejecución manual de WF-06 envía un mensaje informativo de prueba a Slack.
+9. Ejecuta WF-06 desde el formulario de prueba del Centro de Alertas y confirma que la fila correspondiente aparece en `public.alert_notifications` con su estado de entrega. Los hallazgos críticos/altos generados por WF-01 a WF-04 deben aparecer en el Centro de Alertas; el callback autenticado a la API registra el hallazgo y solicita el despacho centralizado. La ejecución manual de WF-06 envía un mensaje informativo de prueba a Slack.
 10. Solo después de importar, configurar y activar los demás workflows, prueba sus disparadores manuales.
 
 ## 5. Alcance y limitaciones conocidas
@@ -141,6 +163,6 @@ No inventes los hosts, puertos ni nombres de conexión: copia los datos de Conne
 - WF-08 marca como fallidas las ejecuciones manuales que sigan en `running` sin callback durante `WORKFLOW_STALE_HOURS` (12 horas por defecto), evitando que queden abiertas indefinidamente.
 - Las ejecuciones manuales se envían a n8n mediante webhooks autenticados. Los workflows WF-01 a WF-10 notifican al backend su resultado final (`success`, `partial` o `failed`) mediante un callback autenticado con secreto compartido y el panel actualiza el historial mientras existan ejecuciones en curso. Si una ejecución termina abruptamente antes de alcanzar su callback, puede permanecer como `running`; revisa WF-00 y los registros de ejecución de n8n para diagnosticar ese caso.
 - El portal público de proveedores utiliza enlaces HMAC con vencimiento de 30 días y un solo uso. La API valida la firma y el estado del enlace, calcula la puntuación en el servidor y persiste las respuestas en Supabase. La entrega real del correo depende de que el workflow WF-05 y la credencial SMTP estén configurados.
-- WF-03 comprueba la vigencia de certificados X.509 y detecta expiraciones próximas; no realiza todavía una auditoría de suites de cifrado TLS.
-- La conexión de n8n con PostgreSQL, Redis, NVD, Shodan, Slack y SMTP depende de credenciales reales configuradas en tu instancia; el repositorio no contiene esas credenciales. WF-06 informa a la API si la entrega fue `sent`, `deduped` o `failed`, y las alertas originadas directamente por escáneres se guardan en `alert_notifications`. En alertas críticas/altas, configura `ALERT_FALLBACK_EMAIL` para evitar que la ausencia de usuarios activos con rol RBAC impida el envío SMTP.
+- WF-03 comprueba la vigencia de certificados X.509 y detecta expiraciones próximas desde la API; no realiza todavía una auditoría de suites de cifrado TLS.
+- La conexión de n8n con PostgreSQL, NVD, Shodan y SMTP depende de credenciales reales configuradas en tu instancia; el repositorio no contiene esas credenciales. Slack se entrega mediante la URL privada configurada en Render. WF-06 informa a la API si la entrega fue `sent`, `deduped` o `failed`, y las alertas originadas directamente por escáneres se guardan en `alert_notifications`. En alertas críticas/altas, configura `ALERT_FALLBACK_EMAIL` para evitar que la ausencia de usuarios activos con rol RBAC impida el envío SMTP.
 - Antes de producción, ejecuta pruebas funcionales, pruebas de permisos por rol, revisión de seguridad y recuperación de errores con tus servicios reales.

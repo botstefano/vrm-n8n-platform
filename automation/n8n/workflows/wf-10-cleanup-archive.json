@@ -26,7 +26,7 @@
         "operation": "executeQuery",
         "query": "WITH c AS (\n  UPDATE vendor_findings\n     SET status = 'closed'::finding_status, closed_at = now(), resolution = 'auto_closed_stale'\n   WHERE status = 'open' AND due_date < now() - make_interval(days => $1::int)\n  RETURNING id\n) SELECT COUNT(*)::int AS closed_findings FROM c;",
         "options": {
-          "queryReplacement": "={{ [Number($env.STALE_FINDING_DAYS || 90)] }}"
+          "queryReplacement": "={{ [Number($vars.STALE_FINDING_DAYS || 90)] }}"
         }
       },
       "id": "pg-close",
@@ -49,7 +49,7 @@
         "operation": "executeQuery",
         "query": "WITH moved AS (\n  DELETE FROM audit_log WHERE created_at < now() - make_interval(years => $1::int) RETURNING *\n), ins AS (\n  INSERT INTO audit_log_archive SELECT * FROM moved RETURNING 1\n) SELECT COUNT(*)::int AS archived_audit FROM ins;",
         "options": {
-          "queryReplacement": "={{ [Number($env.AUDIT_RETENTION_YEARS || 5)] }}"
+          "queryReplacement": "={{ [Number($vars.AUDIT_RETENTION_YEARS || 5)] }}"
         }
       },
       "id": "pg-audit",
@@ -72,7 +72,7 @@
         "operation": "executeQuery",
         "query": "WITH d AS (\n  DELETE FROM score_history WHERE calculated_at < now() - make_interval(years => $1::int) RETURNING 1\n) SELECT COUNT(*)::int AS purged_scores FROM d;",
         "options": {
-          "queryReplacement": "={{ [Number($env.SCORE_RETENTION_YEARS || 2)] }}"
+          "queryReplacement": "={{ [Number($vars.SCORE_RETENTION_YEARS || 2)] }}"
         }
       },
       "id": "pg-score",
@@ -167,23 +167,16 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-N8N-Signature",
-              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
-            }
-          ]
-        },
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
           "timeout": 10000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "manual-completion-http-wf-10",
       "name": "Report Manual Completion",
@@ -193,7 +186,13 @@
         2380,
         520
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
     }
   ],
   "connections": {

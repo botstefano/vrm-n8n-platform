@@ -28,23 +28,22 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.N8N_BASE_URL }}/webhook/vrm-alerts",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-Alert-Token",
-              "value": "={{ $env.ALERTS_WEBHOOK_TOKEN }}"
-            }
-          ]
-        },
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/alert-request",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ type: 'workflow_failed', severity: 'high', title: 'Falló el workflow ' + $json.workflow, description: $json.node + ': ' + $json.message + ' · ' + $json.execution_url, source: 'n8n', source_ref: $json.workflow + ':' + $json.node, fingerprint: 'wf_error:' + $json.workflow + ':' + $json.node }) }}",
         "options": {
-          "timeout": 10000
-        }
+          "timeout": 40000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "alert",
       "name": "Send Alert",
@@ -57,28 +56,27 @@
       "retryOnFail": true,
       "maxTries": 2,
       "waitBetweenTries": 2000,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-failed",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-N8N-Signature",
-              "value": "={{ $env.N8N_WEBHOOK_SECRET }}"
-            }
-          ]
-        },
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-failed",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ workflow: $('Build Payload').first().json.workflow, workflow_id: $('Build Payload').first().json.workflow_id, execution_id: $('Build Payload').first().json.execution_id, execution_url: $('Build Payload').first().json.execution_url, node: $('Build Payload').first().json.node, message: $('Build Payload').first().json.message }) }}",
         "options": {
           "timeout": 10000
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "report",
       "name": "Report Backend",
@@ -91,7 +89,13 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 2000,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
     }
   ],
   "connections": {
