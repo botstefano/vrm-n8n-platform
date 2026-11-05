@@ -27,7 +27,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst allowed = ['critical', 'high', 'medium', 'low', 'info'];\nconst s = String(b.severity || 'medium').toLowerCase();\nconst severity = allowed.includes(s) ? s : 'medium';\nconst route = (severity === 'critical' || severity === 'high') ? 'slack+email' : 'slack';\nconst title = String(b.title || 'Alerta sin título').slice(0, 300);\nconst fingerprint = b.fingerprint || [b.source || 'unknown', b.source_ref || title, b.vendor_id || '', severity].join(':');\nconst front = String($env.VRM_FRONTEND_URL || $env.VRM_BACKEND_URL || '').replace(/\\/$/, '');\nconst esc = x => String(x == null ? '' : x).replace(/[&<>\"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst slackEsc = x => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst link = b.vendor_id ? front + '/vendors/' + b.vendor_id : front;\nconst slack_text = ':rotating_light: *[' + severity.toUpperCase() + ']* ' + slackEsc(title) +\n  (b.vendor_id ? '\\nProveedor: `' + slackEsc(b.vendor_id) + '`' : '') +\n  '\\nFuente: ' + slackEsc(b.source || 'n/a') + (b.source_ref ? ' · ' + slackEsc(b.source_ref) : '') +\n  (b.description ? '\\n' + slackEsc(String(b.description).slice(0, 500)) : '') +\n  (link ? '\\n<' + link + '|Ver en VRM>' : '');\nconst email_html = '<h2>Alerta VRM</h2>' +\n  '<p><b>Severidad:</b> ' + esc(severity) + '</p>' +\n  '<p><b>Título:</b> ' + esc(title) + '</p>' +\n  (b.vendor_id ? '<p><b>Proveedor:</b> ' + esc(b.vendor_id) + '</p>' : '') +\n  '<p><b>Fuente:</b> ' + esc(b.source || 'n/a') + ' — ' + esc(b.source_ref || '') + '</p>' +\n  (b.description ? '<p>' + esc(String(b.description).slice(0, 1000)) + '</p>' : '') +\n  (link ? '<p><a href=\"' + esc(link) + '\">Ver en VRM</a></p>' : '');\nreturn [{ json: { severity, route, title, fingerprint, slack_text,\n  email_subject: '[' + severity.toUpperCase() + '] VRM Alert: ' + title, email_html } }];"
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\nconst allowed = ['critical', 'high', 'medium', 'low', 'info'];\nconst s = String(b.severity || 'medium').toLowerCase();\nconst severity = allowed.includes(s) ? s : 'medium';\nconst route = (severity === 'critical' || severity === 'high') ? 'slack+email' : 'slack';\nconst title = String(b.title || 'Alerta sin título').slice(0, 300);\nconst fingerprint = b.fingerprint || [b.source || 'unknown', b.source_ref || title, b.vendor_id || '', severity].join(':');\nconst alert_id = b.alert_id || null;\nconst vendor_id = b.vendor_id || null;\nconst source = b.source || null;\nconst source_ref = b.source_ref || null;\nconst description = b.description || null;\nconst front = String($vars.VRM_FRONTEND_URL || $vars.VRM_BACKEND_URL || '').replace(/\\/$/, '');\nconst esc = x => String(x == null ? '' : x).replace(/[&<>\"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[c]));\nconst slackEsc = x => String(x == null ? '' : x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst link = b.vendor_id ? front + '/vendors/' + b.vendor_id : front;\nconst slack_text = ':rotating_light: *[' + severity.toUpperCase() + ']* ' + slackEsc(title) +\n  (b.vendor_id ? '\\nProveedor: `' + slackEsc(b.vendor_id) + '`' : '') +\n  '\\nFuente: ' + slackEsc(b.source || 'n/a') + (b.source_ref ? ' · ' + slackEsc(b.source_ref) : '') +\n  (b.description ? '\\n' + slackEsc(String(b.description).slice(0, 500)) : '') +\n  (link ? '\\n<' + link + '|Ver en VRM>' : '');\nconst email_html = '<h2>Alerta VRM</h2>' +\n  '<p><b>Severidad:</b> ' + esc(severity) + '</p>' +\n  '<p><b>Título:</b> ' + esc(title) + '</p>' +\n  (b.vendor_id ? '<p><b>Proveedor:</b> ' + esc(b.vendor_id) + '</p>' : '') +\n  '<p><b>Fuente:</b> ' + esc(b.source || 'n/a') + ' — ' + esc(b.source_ref || '') + '</p>' +\n  (b.description ? '<p>' + esc(String(b.description).slice(0, 1000)) + '</p>' : '') +\n  (link ? '<p><a href=\"' + esc(link) + '\">Ver en VRM</a></p>' : '');\nreturn [{ json: { alert_id, vendor_id, source, source_ref, description, severity, route, title, fingerprint, slack_text,\n  email_subject: '[' + severity.toUpperCase() + '] VRM Alert: ' + title, email_html } }];"
       },
       "id": "normalize",
       "name": "Normalize Alert",
@@ -40,98 +40,23 @@
     },
     {
       "parameters": {
-        "operation": "get",
-        "propertyName": "dedupe",
-        "key": "=alert:dedupe:{{ $json.fingerprint }}",
-        "keyType": "automatic",
-        "options": {}
-      },
-      "id": "redis-get",
-      "name": "Check Dedupe",
-      "type": "n8n-nodes-base.redis",
-      "typeVersion": 1,
-      "position": [
-        700,
-        300
-      ],
-      "credentials": {
-        "redis": {
-          "id": "redisVrm",
-          "name": "Redis VRM"
-        }
-      },
-      "onError": "continueRegularOutput",
-      "alwaysOutputData": true
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "c1",
-              "leftValue": "={{ $json.dedupe ? 'dup' : 'new' }}",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              },
-              "rightValue": "new"
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "if-new",
-      "name": "IF Not Duplicate",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        940,
-        300
-      ]
-    },
-    {
-      "parameters": {
-        "operation": "set",
-        "key": "=alert:dedupe:{{ $('Normalize Alert').first().json.fingerprint }}",
-        "value": "1",
-        "keyType": "string",
-        "expire": true,
-        "ttl": 3600
-      },
-      "id": "redis-set",
-      "name": "Mark Dedupe 1h",
-      "type": "n8n-nodes-base.redis",
-      "typeVersion": 1,
-      "position": [
-        1180,
-        100
-      ],
-      "credentials": {
-        "redis": {
-          "id": "redisVrm",
-          "name": "Redis VRM"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
         "method": "POST",
-        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/slack-delivery",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ text: $('Normalize Alert').first().json.slack_text }) }}",
         "options": {
-          "timeout": 10000
-        }
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "slack",
       "name": "Slack",
@@ -144,7 +69,13 @@
       "retryOnFail": true,
       "maxTries": 2,
       "waitBetweenTries": 2000,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
     },
     {
       "parameters": {
@@ -182,7 +113,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT u.email FROM users u\nJOIN user_roles ur ON ur.user_id = u.id\nJOIN roles r ON r.id = ur.role_id\nWHERE r.code IN ('admin','risk_analyst') AND u.is_active = true;",
+        "query": "SELECT COALESCE(array_agg(DISTINCT u.email) FILTER (WHERE u.email IS NOT NULL), ARRAY[]::text[]) AS emails\nFROM users u\nJOIN user_roles ur ON ur.user_id = u.id\nJOIN roles r ON r.id = ur.role_id\nWHERE r.code IN ('admin','risk_analyst') AND u.is_active = true;",
         "options": {}
       },
       "id": "pg-rcpt",
@@ -200,11 +131,11 @@
         }
       },
       "alwaysOutputData": true,
-      "onError": "continueRegularOutput"
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "jsCode": "const list = [...new Set($input.all().map(i => i.json.email).filter(Boolean))];\nconst to = list.join(',') || $env.ALERT_FALLBACK_EMAIL || $env.SMTP_FROM;\nreturn [{ json: { to } }];"
+        "jsCode": "const row = $input.first()?.json || {};\nconst emails = Array.isArray(row.emails) ? row.emails.filter(Boolean) : [];\nconst fallback = String($vars.ALERT_FALLBACK_EMAIL || '').trim();\nconst to = emails.length ? emails.join(',') : fallback;\nif (!to) {\n  throw new Error('Alerta crítica/alta: no existen destinatarios RBAC activos. Configura ALERT_FALLBACK_EMAIL en n8n.');\n}\nreturn [{ json: { to } }];"
       },
       "id": "join",
       "name": "Join Recipients",
@@ -213,11 +144,12 @@
       "position": [
         2140,
         -100
-      ]
+      ],
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
-        "fromEmail": "={{ $env.SMTP_FROM }}",
+        "fromEmail": "={{ $vars.SMTP_FROM }}",
         "toEmail": "={{ $json.to }}",
         "subject": "={{ $('Normalize Alert').first().json.email_subject }}",
         "emailFormat": "html",
@@ -238,7 +170,10 @@
           "name": "SMTP VRM"
         }
       },
-      "onError": "continueRegularOutput"
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
@@ -257,17 +192,221 @@
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ { ok: true, deduped: true } }}",
+        "httpMethod": "POST",
+        "path": "vrm-manual/wf-06",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
         "options": {}
       },
-      "id": "respond-dupe",
-      "name": "Respond Duplicate",
+      "id": "manual-webhook",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        520
+      ],
+      "webhookId": "vrm-manual-wf-06",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "httpHeaderAlerts",
+          "name": "VRM Alerts Webhook Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "slack-delivered",
+              "leftValue": "={{ Number($json.statusCode || 0) >= 200 && Number($json.statusCode || 0) < 300 }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-slack-delivered",
+      "name": "IF Slack Delivered",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1160,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, deduped: false, slackDelivered: false, error: 'Slack delivery failed; alert was not marked as deduplicated.' } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "respond-slack-failed",
+      "name": "Respond Slack Failed",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1180,
-        500
+        1400,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-06',\n  status: 'success',\n  summary: 'WF-06 completado: notificación procesada y enviada.',\n  details: { requested_by: request.requested_by || null }\n} }];"
+      },
+      "id": "manual-alert-success",
+      "name": "Build Manual Completion Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-06',\n  status: 'failed',\n  summary: 'WF-06 falló al entregar la alerta por Slack o SMTP.',\n  details: { requested_by: request.requested_by || null }\n} }];"
+      },
+      "id": "manual-alert-failed",
+      "name": "Build Manual Completion Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, deduped: false, slackDelivered: true, emailDelivered: false, error: 'Email recipient lookup or SMTP delivery failed; alert was not marked as deduplicated.' } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "respond-email-failed",
+      "name": "Respond Email Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "manual-alert-completion-http",
+      "name": "Report Manual Completion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2180,
+        800
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $('Normalize Alert').first().json || {};\nreturn [{ json: {\n  alert_id: alert.alert_id || null,\n  vendor_id: alert.vendor_id || null,\n  severity: alert.severity,\n  delivery_status: 'sent',\n  title: alert.title,\n  fingerprint: alert.fingerprint,\n  source: alert.source || null,\n  source_ref: alert.source_ref || null,\n  description: alert.description || null,\n  details: { route: alert.route, slack: 'sent', email: alert.route === 'slack+email' ? 'sent' : 'not_required' }\n} }];"
+      },
+      "id": "alert-callback-sent",
+      "name": "Build Alert Callback Sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        900
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/alert-dispatched",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "report-alert-delivery",
+      "name": "Report Alert Delivery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        1080
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $('Normalize Alert').first().json || {};\nreturn [{ json: {\n  alert_id: alert.alert_id || null,\n  vendor_id: alert.vendor_id || null,\n  severity: alert.severity,\n  delivery_status: 'failed',\n  title: alert.title,\n  fingerprint: alert.fingerprint,\n  source: alert.source || null,\n  source_ref: alert.source_ref || null,\n  description: alert.description || null,\n  details: { route: alert.route, slack: 'failed', email: alert.route === 'slack+email' ? 'not_attempted' : 'not_required' }\n} }];"
+      },
+      "id": "alert-callback-slack-failed",
+      "name": "Build Alert Callback Slack Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        1440
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $('Normalize Alert').first().json || {};\nreturn [{ json: {\n  alert_id: alert.alert_id || null,\n  vendor_id: alert.vendor_id || null,\n  severity: alert.severity,\n  delivery_status: 'failed',\n  title: alert.title,\n  fingerprint: alert.fingerprint,\n  source: alert.source || null,\n  source_ref: alert.source_ref || null,\n  description: alert.description || null,\n  details: { route: alert.route, slack: 'sent', email: 'failed' }\n} }];"
+      },
+      "id": "alert-callback-email-failed",
+      "name": "Build Alert Callback Email Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1940,
+        1620
       ]
     }
   ],
@@ -287,28 +426,6 @@
       "main": [
         [
           {
-            "node": "Check Dedupe",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Check Dedupe": {
-      "main": [
-        [
-          {
-            "node": "IF Not Duplicate",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Mark Dedupe 1h": {
-      "main": [
-        [
-          {
             "node": "Slack",
             "type": "main",
             "index": 0
@@ -320,7 +437,7 @@
       "main": [
         [
           {
-            "node": "IF Requires Email",
+            "node": "IF Slack Delivered",
             "type": "main",
             "index": 0
           }
@@ -335,6 +452,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Respond Email Failed",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -343,6 +467,13 @@
         [
           {
             "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Email Failed",
             "type": "main",
             "index": 0
           }
@@ -357,21 +488,10 @@
             "type": "main",
             "index": 0
           }
-        ]
-      ]
-    },
-    "IF Not Duplicate": {
-      "main": [
-        [
-          {
-            "node": "Mark Dedupe 1h",
-            "type": "main",
-            "index": 0
-          }
         ],
         [
           {
-            "node": "Respond Duplicate",
+            "node": "Respond Email Failed",
             "type": "main",
             "index": 0
           }
@@ -390,6 +510,138 @@
         [
           {
             "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Slack Delivered": {
+      "main": [
+        [
+          {
+            "node": "IF Requires Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Slack Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond OK": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion Success",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Alert Callback Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Slack Failed": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion Failed",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Alert Callback Slack Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond Email Failed": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion Failed",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Alert Callback Email Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion Success": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion Failed": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert Callback Sent": {
+      "main": [
+        [
+          {
+            "node": "Report Alert Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert Callback Slack Failed": {
+      "main": [
+        [
+          {
+            "node": "Report Alert Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Alert Callback Email Failed": {
+      "main": [
+        [
+          {
+            "node": "Report Alert Delivery",
             "type": "main",
             "index": 0
           }

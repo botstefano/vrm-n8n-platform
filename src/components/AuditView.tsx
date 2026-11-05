@@ -13,22 +13,24 @@ import {
   ShieldCheck,
   RefreshCw
 } from 'lucide-react';
-import { AuditLogEntry } from '../types';
-import { store } from '../services/store';
+import { AuditLogEntry, Vendor, VendorTechnology, VendorFinding, Assessment, ScoreHistoryEntry } from '../types';
 
 interface AuditViewProps {
   auditLog: AuditLogEntry[];
   auditArchive: AuditLogEntry[];
+  vendors: Vendor[];
+  technologies: VendorTechnology[];
+  findings: VendorFinding[];
+  assessments: Assessment[];
+  scoreHistory: ScoreHistoryEntry[];
+  onExecuteWorkflow: (workflowId: string) => Promise<void>;
+  canCleanup: boolean;
 }
 
-export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive }) => {
+export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive, vendors, technologies, findings, assessments, scoreHistory, onExecuteWorkflow, canCleanup }) => {
   const [activeTab, setActiveTab] = useState<'live' | 'archive'>('live');
   const [searchTerm, setSearchTerm] = useState('');
-  const [cleanupResult, setCleanupResult] = useState<{
-    closedFindings: number;
-    archivedAudit: number;
-    purgedScores: number;
-  } | null>(null);
+  const [cleanupRequested, setCleanupRequested] = useState(false);
 
   const displayedList = activeTab === 'live' ? auditLog : auditArchive;
   const filteredList = displayedList.filter((entry) => {
@@ -41,20 +43,24 @@ export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive }) 
     );
   });
 
-  const handleRunCleanup = () => {
-    const res = store.runCleanupAndArchive(90, 1);
-    setCleanupResult(res);
+  const handleRunCleanup = async () => {
+    try {
+      await onExecuteWorkflow('wf-10');
+      setCleanupRequested(true);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'No se pudo solicitar WF-10.');
+    }
   };
 
   const handleExportJson = () => {
     const exportData = {
-      vendors: store.getVendors(),
-      technologies: store.getTechnologies(),
-      findings: store.getFindings(),
-      assessments: store.getAssessments(),
-      auditLog: store.getAuditLog(),
-      auditArchive: store.getAuditArchive(),
-      scoreHistory: store.getScoreHistory(),
+      vendors,
+      technologies,
+      findings,
+      assessments,
+      auditLog,
+      auditArchive,
+      scoreHistory,
       exportedAt: new Date().toISOString()
     };
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -88,30 +94,31 @@ export const AuditView: React.FC<AuditViewProps> = ({ auditLog, auditArchive }) 
             <span>Exportar JSON</span>
           </button>
 
-          <button
-            onClick={handleRunCleanup}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-md shadow-cyan-950 transition-colors"
-          >
-            <Play className="w-3.5 h-3.5" />
-            <span>Ejecutar WF-10 Limpieza</span>
-          </button>
+          {canCleanup && (
+            <button
+              onClick={handleRunCleanup}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-md shadow-cyan-950 transition-colors"
+            >
+              <Play className="w-3.5 h-3.5" />
+              <span>Ejecutar WF-10 Limpieza</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* WF-10 Summary Banner if triggered */}
-      {cleanupResult && (
+      {cleanupRequested && (
         <div className="p-4 rounded-xl bg-cyan-950/60 border border-cyan-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <CheckCircle2 className="w-5 h-5 text-cyan-400 shrink-0" />
             <div>
-              <div className="text-xs font-bold text-white">WF-10 Cleanup & Archive ejecutado exitosamente</div>
+              <div className="text-xs font-bold text-white">Solicitud de WF-10 aceptada</div>
               <div className="text-[11px] text-cyan-300/80">
-                {cleanupResult.closedFindings} hallazgos obsoletos cerrados con resolución <code className="font-mono">auto_closed_stale</code> · {cleanupResult.archivedAudit} registros movidos a <code className="font-mono">audit_log_archive</code>.
+                n8n recibió la solicitud. Los cambios aparecerán en auditoría cuando el workflow termine.
               </div>
             </div>
           </div>
           <button
-            onClick={() => setCleanupResult(null)}
+            onClick={() => setCleanupRequested(false)}
             className="text-xs text-slate-400 hover:text-slate-200"
           >
             Cerrar

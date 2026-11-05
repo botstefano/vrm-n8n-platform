@@ -1,0 +1,196 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [master, feature/supabase-integration, feature/n8n-cloud-compatibility]
+  pull_request:
+    branches: [master, feature/supabase-integration]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: TypeScript and Vite production build
+        run: npm run build
+      - name: Security helper tests
+        run: npm test
+      - name: Validate n8n Cloud compatibility
+        run: npm run validate:n8n-cloud
+      - name: Check Express API JavaScript syntax
+        run: node --check server.js
+      - name: Validate n8n workflows and Code node JavaScript
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = 'automation/n8n/workflows';
+          let workflowCount = 0;
+          let codeNodeCount = 0;
+          const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+          for (const file of fs.readdirSync(path).filter((name) => name.endsWith('.json'))) {
+            const workflow = JSON.parse(fs.readFileSync(`${path}/${file}`, 'utf8'));
+            const code = file.match(/^(wf-\d{2})-/)?.[1];
+            if (!code) throw new Error(`Unexpected workflow file name: ${file}`);
+            const nodes = workflow.nodes || [];
+            const nodeNames = new Set(nodes.map((node) => node.name));
+            workflowCount += 1;
+
+            for (const [source, outputs] of Object.entries(workflow.connections || {})) {
+              if (!nodeNames.has(source)) throw new Error(`${file}: connection source "${source}" does not exist`);
+              for (const branch of Object.values(outputs || {})) {
+                for (const group of branch || []) {
+                  for (const connection of group || []) {
+                    if (!nodeNames.has(connection.node)) {
+                      throw new Error(`${file}: connection target "${connection.node}" does not exist`);
+                    }
+                  }
+                }
+              }
+            }
+
+            if (code === 'wf-00') {
+              if (!nodes.some((node) => node.type === 'n8n-nodes-base.errorTrigger')) {
+                throw new Error(`${file}: WF-00 must retain its event-driven Error Trigger`);
+              }
+            } else {
+              const manual = nodes.filter((node) => node.name === 'Manual Trigger');
+              if (manual.length !== 1) throw new Error(`${file}: expected exactly one Manual Trigger`);
+              if (manual[0].parameters?.path !== `vrm-manual/${code}`) {
+                throw new Error(`${file}: manual webhook path does not match ${code}`);
+              }
+              if (manual[0].parameters?.authentication !== 'headerAuth' || !manual[0].credentials?.httpHeaderAuth) {
+                throw new Error(`${file}: manual webhook must use Header Auth credentials`);
+              }
+              const builders = nodes.filter((node) => node.name.startsWith('Build Manual Completion'));
+              const reporter = nodes.find((node) => node.name === 'Report Manual Completion');
+              if (builders.length === 0 || !reporter) {
+                throw new Error(`${file}: manual runs must report their final status to the backend`);
+              }
+              if (!String(reporter.parameters?.url || '').includes('/api/v1/webhooks/n8n/workflow-completed')) {
+                throw new Error(`${file}: completion callback URL is invalid`);
+              }
+              for (const builder of builders) {
+                const targets = Object.values(workflow.connections?.[builder.name] || {})
+                  .flat(2).map((connection) => connection.node);
+                if (!targets.includes('Report Manual Completion')) {
+                  throw new Error(`${file}: ${builder.name} is not connected to the completion callback`);
+                }
+              }
+              // Validate the complete manual execution path, not just isolated callback edges.
+              const reachable = new Set();
+              const pending = ['Manual Trigger'];
+              while (pending.length) {
+                const current = pending.pop();
+                if (reachable.has(current)) continue;
+                reachable.add(current);
+                const outputs = workflow.connections?.[current] || {};
+                for (const connection of Object.values(outputs).flat(2)) pending.push(connection.node);
+              }
+              for (const builder of builders) {
+                if (!reachable.has(builder.name)) {
+                  throw new Error(`${file}: ${builder.name} cannot be reached from Manual Trigger`);
+                }
+              }
+              if (!reachable.has('Report Manual Completion')) {
+                throw new Error(`${file}: Manual Trigger cannot reach Report Manual Completion`);
+              }
+              const completionCredential = reporter.credentials?.httpHeaderAuth?.name;
+              if (completionCredential !== 'VRM Backend Callback Auth') {
+                throw new Error(`${file}: completion callback must use VRM Backend Callback Auth`);
+              }
+              if (code === 'wf-06') {
+                const alertReporter = nodes.find((node) => node.name === 'Report Alert Delivery');
+                const alertBuilders = nodes.filter((node) => node.name.startsWith('Build Alert Callback'));
+                if (!alertReporter || !String(alertReporter.parameters?.url || '').includes('/api/v1/webhooks/n8n/alert-dispatched')) {
+                  throw new Error(`${file}: alert delivery callback is missing or misconfigured`);
+                }
+                if (alertReporter.credentials?.httpHeaderAuth?.name !== 'VRM Backend Callback Auth') {
+                  throw new Error(`${file}: alert delivery callback must use VRM Backend Callback Auth`);
+                }
+                for (const builder of alertBuilders) {
+                  const targets = Object.values(workflow.connections?.[builder.name] || {})
+                    .flat(2).map((connection) => connection.node);
+                  if (!targets.includes('Report Alert Delivery')) {
+                    throw new Error(`${file}: ${builder.name} is not connected to the alert delivery callback`);
+                  }
+                }
+                if (alertBuilders.length < 3) throw new Error(`${file}: expected sent, deduped and failed alert callbacks`);
+              }
+            }
+
+            for (const node of nodes) {
+              if (node.type !== 'n8n-nodes-base.code') continue;
+              try {
+                new AsyncFunction(node.parameters?.jsCode || '');
+                codeNodeCount += 1;
+              } catch (error) {
+                throw new Error(`${file} / ${node.name}: ${error.message}`);
+              }
+            }
+          }
+          if (workflowCount !== 11) throw new Error(`Expected 11 workflows, found ${workflowCount}`);
+
+          // Guard known integration contracts against regressions.
+          const nvd = JSON.parse(fs.readFileSync(`${path}/wf-01-nvd-cve.json`, 'utf8'));
+          const nvdRequest = nvd.nodes.find((node) => node.name === 'NVD Query');
+          const nvdPageSize = nvdRequest?.parameters?.queryParameters?.parameters
+            ?.find((parameter) => parameter.name === 'resultsPerPage')?.value;
+          if (String(nvdPageSize) !== '2000') throw new Error('WF-01 must request the NVD maximum page size (2000)');
+          const nvdPagination = nvdRequest?.parameters?.options?.pagination?.pagination;
+          if (nvdPagination?.paginationMode !== 'updateAParameterInEachRequest' ||
+              nvdPagination?.parameters?.parameters?.[0]?.name !== 'startIndex' ||
+              nvdPagination?.maxRequests !== 50 ||
+              nvdPagination?.requestInterval !== 6000) {
+            throw new Error('WF-01 must paginate NVD results with a bounded page count and rate-limit interval');
+          }
+          const nvdParser = nvd.nodes.find((node) => node.name === 'Parse CVEs')?.parameters?.jsCode || '';
+          if (!nvdParser.includes('state.lastEnd < state.totalResults')) {
+            throw new Error('WF-01 must report incomplete scans when the pagination limit is reached');
+          }
+
+          const health = JSON.parse(fs.readFileSync(`${path}/wf-08-health-check.json`, 'utf8'));
+          const healthQuery = health.nodes.find((node) => node.name === 'Get Job Status');
+          const healthCode = health.nodes.find((node) => node.name === 'Detect Problems')?.parameters?.jsCode || '';
+          if (!healthQuery?.parameters?.query?.includes('workflow_execution_logs') ||
+              !healthQuery?.parameters?.options?.queryReplacement?.includes('WORKFLOW_STALE_HOURS') ||
+              !healthCode.includes('staleExecutions')) {
+            throw new Error('WF-08 must recover manual executions that never report completion');
+          }
+
+          const tls = JSON.parse(fs.readFileSync(`${path}/wf-03-tls-expiry.json`, 'utf8'));
+          const tlsInsert = tls.nodes.find((node) => node.name === 'Insert Finding');
+          const tlsQuery = tlsInsert?.parameters?.query || '';
+          if (!tlsQuery.includes("$7::jsonb ->> 'host'") ||
+              !tlsQuery.includes("$7::jsonb ->> 'port'") ||
+              !tlsQuery.includes('source_ref <> $3')) {
+            throw new Error('WF-03 must retire superseded certificate findings by host and port, not by the full dated reference');
+          }
+
+          const server = fs.readFileSync('server.js', 'utf8');
+          const failedCallback = server.slice(
+            server.indexOf("app.post('/api/v1/webhooks/n8n/workflow-failed'"),
+            server.indexOf("app.post('/api/v1/webhooks/n8n/workflow-completed'")
+          );
+          if (!failedCallback.includes('if (auditError) throw auditError;')) {
+            throw new Error('n8n failure callback must return an error when its audit event cannot be persisted');
+          }
+          if (!server.includes('signal: AbortSignal.timeout(15000)') ||
+              !server.includes('signal: AbortSignal.timeout(30000)')) {
+            throw new Error('n8n webhook requests must have bounded response timeouts');
+          }
+
+          console.log(`Validated ${workflowCount} workflows, their connections/manual triggers, ${codeNodeCount} Code node scripts, and critical API/workflow contracts.`);
+          NODE

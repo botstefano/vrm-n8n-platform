@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Activity,
   CheckCircle2,
@@ -12,28 +12,38 @@ import {
   Database
 } from 'lucide-react';
 import { MonitoringJob } from '../types';
-import { store } from '../services/store';
+import { apiRequest } from '../services/api';
 
 interface HealthViewProps {
   jobs: MonitoringJob[];
   onExecuteWorkflow: (wfId: string) => Promise<void>;
   isExecuting: boolean;
+  canWrite: boolean;
 }
 
-export const HealthView: React.FC<HealthViewProps> = ({ jobs, onExecuteWorkflow, isExecuting }) => {
-  const [backendPing, setBackendPing] = useState<{ status: 'online' | 'offline'; latencyMs: number }>({
-    status: 'online',
-    latencyMs: 14
-  });
+export const HealthView: React.FC<HealthViewProps> = ({ jobs, onExecuteWorkflow, isExecuting, canWrite }) => {
+  const [backendPing, setBackendPing] = useState<{ status: 'online' | 'offline' | 'checking'; latencyMs: number | null; database: 'connected' | 'unavailable' | 'unknown' }>({ status: 'checking', latencyMs: null, database: 'unknown' });
 
   const overdueJobs = jobs.filter(
-    (j) => j.next_run && new Date(j.next_run) < new Date() && j.status !== 'healthy'
+    (job) => job.next_run && new Date(job.next_run) < new Date() && job.status !== 'healthy'
   );
 
-  const handlePingBackend = () => {
-    const lat = Math.floor(10 + Math.random() * 20);
-    setBackendPing({ status: 'online', latencyMs: lat });
+  const handlePingBackend = async () => {
+    setBackendPing((current) => ({ ...current, status: 'checking' }));
+    const started = performance.now();
+    try {
+      const health = await apiRequest<{ status: string; database: string }>('/api/health');
+      setBackendPing({
+        status: health.status === 'online' ? 'online' : 'offline',
+        database: health.database === 'connected' ? 'connected' : 'unavailable',
+        latencyMs: Math.round(performance.now() - started)
+      });
+    } catch {
+      setBackendPing({ status: 'offline', database: 'unavailable', latencyMs: null });
+    }
   };
+
+  useEffect(() => { void handlePingBackend(); }, []);
 
   return (
     <div className="space-y-6">
@@ -49,14 +59,16 @@ export const HealthView: React.FC<HealthViewProps> = ({ jobs, onExecuteWorkflow,
           </p>
         </div>
 
-        <button
-          onClick={() => onExecuteWorkflow('wf-08')}
-          disabled={isExecuting}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white shadow-md shadow-cyan-950 transition-colors"
-        >
-          <Play className="w-3.5 h-3.5" />
-          <span>Ejecutar Health Check (WF-08)</span>
-        </button>
+        {canWrite && (
+          <button
+            onClick={() => onExecuteWorkflow('wf-08')}
+            disabled={isExecuting}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white shadow-md shadow-cyan-950 transition-colors"
+          >
+            <Play className="w-3.5 h-3.5" />
+            <span>Ejecutar Health Check (WF-08)</span>
+          </button>
+        )}
       </div>
 
       {/* Status Cards */}
@@ -66,12 +78,12 @@ export const HealthView: React.FC<HealthViewProps> = ({ jobs, onExecuteWorkflow,
           <div className="space-y-1">
             <span className="text-xs text-slate-400">VRM Backend API</span>
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className={`w-2.5 h-2.5 rounded-full ${backendPing.status === "online" ? "bg-emerald-400" : backendPing.status === "checking" ? "bg-amber-400 animate-pulse" : "bg-rose-400"}`} />
               <span className="text-sm font-bold text-white uppercase tracking-wider">
-                {backendPing.status} (200 OK)
+                {backendPing.status}
               </span>
             </div>
-            <div className="text-[11px] text-slate-500 font-mono">Latencia: {backendPing.latencyMs}ms</div>
+            <div className="text-[11px] text-slate-500 font-mono">Latencia: {backendPing.latencyMs === null ? '—' : `${backendPing.latencyMs}ms`}</div>
           </div>
           <button
             onClick={handlePingBackend}
@@ -87,10 +99,10 @@ export const HealthView: React.FC<HealthViewProps> = ({ jobs, onExecuteWorkflow,
           <div className="space-y-1">
             <span className="text-xs text-slate-400">Base de Datos PostgreSQL</span>
             <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-              <span className="text-sm font-bold text-white uppercase tracking-wider">Conectado</span>
+              <span className={`w-2.5 h-2.5 rounded-full ${backendPing.database === "connected" ? "bg-emerald-400" : backendPing.database === "unknown" ? "bg-amber-400" : "bg-rose-400"}`} />
+              <span className="text-sm font-bold text-white uppercase tracking-wider">{backendPing.database}</span>
             </div>
-            <div className="text-[11px] text-slate-500 font-mono">11 Tablas · Pool activo</div>
+            <div className="text-[11px] text-slate-500 font-mono">Comprobación real de PostgreSQL</div>
           </div>
           <Database className="w-5 h-5 text-cyan-400" />
         </div>

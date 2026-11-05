@@ -26,6 +26,23 @@ import {
 import { WORKFLOWS_REGISTRY } from '../data/seedData';
 import { WorkflowSummary, MonitoringJob } from '../types';
 import { store, WorkflowRunLog } from '../services/store';
+import wf00 from '../../automation/n8n/workflows/wf-00-global-error-handler.json';
+import wf01 from '../../automation/n8n/workflows/wf-01-nvd-cve.json';
+import wf02 from '../../automation/n8n/workflows/wf-02-ct-logs.json';
+import wf03 from '../../automation/n8n/workflows/wf-03-tls-expiry.json';
+import wf04 from '../../automation/n8n/workflows/wf-04-attack-surface.json';
+import wf05 from '../../automation/n8n/workflows/wf-05-reevaluation.json';
+import wf06 from '../../automation/n8n/workflows/wf-06-alerts.json';
+import wf07 from '../../automation/n8n/workflows/wf-07-scorecard-refresh.json';
+import wf08 from '../../automation/n8n/workflows/wf-08-health-check.json';
+import wf09 from '../../automation/n8n/workflows/wf-09-weekly-digest.json';
+import wf10 from '../../automation/n8n/workflows/wf-10-cleanup-archive.json';
+
+const WORKFLOW_DEFINITIONS: Record<string, unknown> = {
+  'wf-00': wf00, 'wf-01': wf01, 'wf-02': wf02, 'wf-03': wf03,
+  'wf-04': wf04, 'wf-05': wf05, 'wf-06': wf06, 'wf-07': wf07,
+  'wf-08': wf08, 'wf-09': wf09, 'wf-10': wf10
+};
 
 interface WorkflowsViewProps {
   jobs: MonitoringJob[];
@@ -33,6 +50,8 @@ interface WorkflowsViewProps {
   onExecuteWorkflow: (wfId: string) => Promise<void>;
   isExecuting: boolean;
   executingWfId: string | null;
+  canWrite: boolean;
+  isAdmin: boolean;
 }
 
 export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
@@ -40,7 +59,9 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
   logs,
   onExecuteWorkflow,
   isExecuting,
-  executingWfId
+  executingWfId,
+  canWrite,
+  isAdmin
 }) => {
   const [selectedWfId, setSelectedWfId] = useState<string>('wf-01');
   const [activeTab, setActiveTab] = useState<'pipeline' | 'logs' | 'n8n_json'>('pipeline');
@@ -56,21 +77,22 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
       case 'wf-00':
         return [
           { name: 'Error Trigger', type: 'Trigger', desc: 'Captura fallos de cualquier workflow' },
-          { name: 'Dead-Letter Log', type: 'Postgres', desc: 'Registra traza de diagnóstico' },
-          { name: 'WF-06 Alert Webhook', type: 'HTTP Webhook', desc: 'Reenvía incidente a Slack/Email' }
+          { name: 'Build Payload', type: 'Code JS', desc: 'Extrae workflow, ejecución, nodo y mensaje de error' },
+          { name: 'WF-06 Alert Webhook', type: 'HTTP Webhook', desc: 'Reenvía el incidente a Slack/Email' },
+          { name: 'Report Backend', type: 'HTTP', desc: 'Registra el evento en la auditoría de la API' }
         ];
       case 'wf-01':
         return [
-          { name: 'Cron 6h', type: 'Schedule', desc: '0 */6 * * *' },
+          { name: 'Cron 6h', type: 'Schedule', desc: 'Intervalo cada 6 horas' },
           { name: 'Get Window', type: 'Postgres', desc: 'Ventana desde última ejecución' },
           { name: 'Get Technologies', type: 'Postgres', desc: 'CPEs activos (cpe:2.3:a:...)' },
-          { name: 'Query NVD 2.0 API', type: 'HTTP Request', desc: 'Filtra CVSS >= NVD_MIN_CVSS' },
-          { name: 'Insert Findings', type: 'Postgres', desc: 'ON CONFLICT DO NOTHING (idempotente)' },
+          { name: 'Query NVD 2.0 API', type: 'HTTP Request', desc: 'Paginación por startIndex, 2.000 CVE por página' },
+          { name: 'Upsert Findings', type: 'Postgres', desc: 'Deduplica por proveedor/CVE y actualiza si escala la severidad' },
           { name: 'Notify Severe', type: 'Condition / Alert', desc: 'Dispara WF-06 si CVSS >= 7' }
         ];
       case 'wf-02':
         return [
-          { name: 'Cron 24h', type: 'Schedule', desc: 'Diario 00:00 UTC' },
+          { name: 'Cron 24h', type: 'Schedule', desc: 'Intervalo cada 24 horas' },
           { name: 'Get Domains', type: 'Postgres', desc: 'Dominios de proveedores' },
           { name: 'Query crt.sh API', type: 'HTTP Request', desc: 'Certificate Transparency logs' },
           { name: 'Filter Subdomains', type: 'Code JS', desc: 'Clasifica dev|staging|admin|vpn' },
@@ -79,23 +101,23 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         ];
       case 'wf-03':
         return [
-          { name: 'Cron 24h', type: 'Schedule', desc: 'Diario 01:00 UTC' },
-          { name: 'Get Active Endpoints', type: 'Postgres', desc: 'Hosts HTTPS activos' },
-          { name: 'Native TLS Handshake', type: 'Code (tls)', desc: 'Sin shell; evalúa x509 cert chain' },
+          { name: 'Cron 24h', type: 'Schedule', desc: 'Intervalo cada 24 horas' },
+          { name: 'Get Active Endpoints', type: 'Postgres', desc: 'Hosts HTTPS de proveedores activos' },
+          { name: 'TLS Certificate Probe', type: 'Code (tls)', desc: 'Inspecciona certificado X.509 y fecha de expiración; no evalúa cifrados débiles' },
           { name: 'Check Thresholds', type: 'IF Node', desc: '<60 días, <30 días, <7 días, vencido' },
           { name: 'Upsert Finding', type: 'Postgres', desc: 'Alerta solo si escala de severidad' }
         ];
       case 'wf-04':
         return [
-          { name: 'Cron 24h', type: 'Schedule', desc: 'Diario 02:00 UTC' },
-          { name: 'Resolve Hostnames', type: 'Code (dns)', desc: 'Resuelve IPs públicas' },
+          { name: 'Cron 24h', type: 'Schedule', desc: 'Intervalo cada 24 horas' },
+          { name: 'Resolve Hostnames', type: 'Code (dns)', desc: 'Resuelve IP pública y bloquea direcciones privadas o reservadas' },
           { name: 'Query Shodan Host API', type: 'HTTP Request', desc: 'Consulta puertos y banners' },
           { name: 'Flag Dangerous Ports', type: 'Code JS', desc: 'RDP 3389, SMB 445, Redis 6379...' },
           { name: 'Insert Shodan Finding', type: 'Postgres', desc: 'Guarda banner y CVEs' }
         ];
       case 'wf-05':
         return [
-          { name: 'Cron 6h', type: 'Schedule', desc: '0 */6 * * *' },
+          { name: 'Cron 6h', type: 'Schedule', desc: 'Intervalo cada 6 horas' },
           { name: 'Find Due Vendors', type: 'Postgres', desc: 'Vencidos a 90/180/365 días' },
           { name: 'Create Assessment', type: 'Postgres', desc: 'Estado = reevaluation' },
           { name: 'Sign HMAC Portal Link', type: 'Code (crypto)', desc: 'HMAC-SHA256 con PORTAL_TOKEN_SECRET' },
@@ -111,22 +133,21 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         ];
       case 'wf-07':
         return [
-          { name: 'Cron 1h', type: 'Schedule', desc: 'Cada hora en punto' },
+          { name: 'Cron 1h', type: 'Schedule', desc: 'Intervalo cada hora' },
           { name: 'Get Active Vendors', type: 'Postgres', desc: 'Proveedores en monitoreo' },
-          { name: 'Call Recalc API', type: 'HTTP Request', desc: 'POST /api/v1/scorecard/recalc/{id}' },
-          { name: 'Update Score History', type: 'Postgres', desc: 'Registra snapshot temporal' }
+          { name: 'Call Recalc API', type: 'HTTP Request', desc: 'POST /api/v1/scorecard/recalc/{id}; el backend registra score_history' }
         ];
       case 'wf-08':
         return [
-          { name: 'Cron 30m', type: 'Schedule', desc: 'Cada 30 minutos' },
+          { name: 'Cron 30m', type: 'Schedule', desc: 'Intervalo cada 30 minutos' },
           { name: 'Check Stalled Jobs', type: 'Postgres', desc: 'Jobs sin correr según umbral' },
           { name: 'Ping Backend /health', type: 'HTTP Request', desc: 'Verifica uptime del servidor' },
           { name: 'Deadman Alert', type: 'IF / Alert', desc: 'Dispara WF-06 si hay degradación' }
         ];
       case 'wf-09':
         return [
-          { name: 'Cron Weekly', type: 'Schedule', desc: 'Lunes 08:00 UTC' },
-          { name: 'Query Open Findings', type: 'Postgres', desc: 'Consolida métricas semanales' },
+          { name: 'Cron Weekly', type: 'Schedule', desc: 'Lunes 08:00 America/Lima' },
+          { name: 'Query Risk & Findings', type: 'Postgres', desc: 'Riesgo, hallazgos abiertos/vencidos, nuevos/cerrados y top 10 proveedores' },
           { name: 'Render HTML Digest', type: 'Code JS', desc: 'Plantilla ejecutiva formateada' },
           { name: 'Send BCC Email', type: 'SMTP Node', desc: 'Envío único a partes interesadas' }
         ];
@@ -134,8 +155,9 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         return [
           { name: 'Cron Daily 03:00', type: 'Schedule', desc: 'Mantenimiento nocturno' },
           { name: 'Close Stale Findings', type: 'Postgres', desc: "auto_closed_stale (>STALE_FINDING_DAYS)" },
-          { name: 'Archive Audit Logs', type: 'Postgres', desc: 'Mueve a audit_log_archive (>1y)' },
-          { name: 'Purge Old Scores', type: 'Postgres', desc: 'Depura histórico > 1 año' }
+          { name: 'Archive Audit Logs', type: 'Postgres', desc: 'Archiva según AUDIT_RETENTION_YEARS (5 años por defecto)' },
+          { name: 'Purge Old Scores', type: 'Postgres', desc: 'Purga según SCORE_RETENTION_YEARS (2 años por defecto)' },
+          { name: 'Log Run', type: 'Postgres', desc: 'Registra el resultado en monitoring_jobs' }
         ];
       default:
         return [];
@@ -143,27 +165,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
   };
 
   const getWorkflowJsonSnippet = (wf: WorkflowSummary) => {
-    return JSON.stringify(
-      {
-        name: wf.name,
-        code: wf.code,
-        trigger: wf.trigger,
-        schedule: wf.scheduleDescription,
-        description: wf.description,
-        job_type: wf.jobType || null,
-        nodes_pipeline: getPipelineNodes(wf.id),
-        environment_dependencies: [
-          'POSTGRES_DB',
-          'REDIS_VRM',
-          'N8N_WEBHOOK_SECRET',
-          'PORTAL_TOKEN_SECRET',
-          'VRM_BACKEND_URL',
-          'NVD_MIN_CVSS'
-        ]
-      },
-      null,
-      2
-    );
+    return JSON.stringify(WORKFLOW_DEFINITIONS[wf.id] || {}, null, 2);
   };
 
   return (
@@ -181,18 +183,28 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => onExecuteWorkflow(selectedWfId)}
-            disabled={isExecuting}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white shadow-lg shadow-cyan-950 transition-all"
-          >
-            <Play className={`w-3.5 h-3.5 ${isExecuting && executingWfId === selectedWfId ? 'animate-spin' : ''}`} />
-            <span>
-              {isExecuting && executingWfId === selectedWfId
-                ? 'Ejecutando Pipeline...'
-                : `Ejecutar ${selectedWf.code}`}
+          {!canWrite ? (
+            <span className="px-3 py-2 text-xs text-slate-400 rounded-lg border border-slate-700">Solo lectura</span>
+          ) : selectedWfId === 'wf-10' && !isAdmin ? (
+            <span className="px-3 py-2 text-xs text-slate-400 rounded-lg border border-slate-700">WF-10 reservado para administradores</span>
+          ) : selectedWfId === 'wf-00' ? (
+            <span className="px-3 py-2 text-xs text-slate-400 rounded-lg border border-slate-700">
+              WF-00 se ejecuta automáticamente al producirse un error
             </span>
-          </button>
+          ) : (
+            <button
+              onClick={() => onExecuteWorkflow(selectedWfId)}
+              disabled={isExecuting}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white shadow-lg shadow-cyan-950 transition-all"
+            >
+              <Play className={`w-3.5 h-3.5 ${isExecuting && executingWfId === selectedWfId ? 'animate-spin' : ''}`} />
+              <span>
+                {isExecuting && executingWfId === selectedWfId
+                  ? 'Ejecutando Pipeline...'
+                  : `Ejecutar ${selectedWf.code}`}
+              </span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -228,7 +240,12 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                     {isRunningThis ? (
                       <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
                     ) : (
-                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                      <span className={`w-2 h-2 rounded-full ${
+                        job?.status === 'healthy' ? 'bg-emerald-400'
+                        : job?.status === 'failed' ? 'bg-rose-400'
+                        : job?.status === 'overdue' ? 'bg-amber-400'
+                        : 'bg-slate-500'
+                      }`} />
                     )}
                   </div>
 
@@ -303,7 +320,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Esquema n8n JSON
+                JSON real de n8n
               </button>
             </div>
 
@@ -311,9 +328,13 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
             {activeTab === 'pipeline' && (
               <div className="space-y-4 pt-2">
                 <div className="text-[11px] text-slate-400 flex items-center justify-between">
-                  <span>Secuencia de Nodos y Conexiones en n8n:</span>
+                  <span>Secuencia resumida de nodos definida en el repositorio:</span>
                   <span className="font-mono text-cyan-400">Error Workflow: WF-00</span>
                 </div>
+                <p className="text-[10px] text-slate-500">
+                  “Definido” confirma que el paso está descrito en el JSON; no significa que el workflow esté importado,
+                  activo o conectado a credenciales reales. El punto de estado de cada workflow refleja la última ejecución registrada.
+                </p>
 
                 <div className="relative space-y-3">
                   {getPipelineNodes(selectedWf.id).map((node, idx, arr) => (
@@ -335,8 +356,8 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                         </div>
 
                         <div className="text-right">
-                          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
-                            Ready
+                          <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                            Definido
                           </span>
                         </div>
                       </div>
@@ -392,14 +413,27 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
                     <div key={log.id} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
                       <div className="flex items-center justify-between text-xs">
                         <div className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          {log.status === 'success' ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          ) : log.status === 'failed' ? (
+                            <AlertCircle className="w-4 h-4 text-rose-400" />
+                          ) : log.status === 'partial' ? (
+                            <AlertCircle className="w-4 h-4 text-amber-400" />
+                          ) : (
+                            <Clock className="w-4 h-4 text-cyan-400" />
+                          )}
                           <span className="font-mono font-bold text-slate-200">{log.id}</span>
                           <span className="text-slate-500">·</span>
                           <span className="text-slate-400">
                             {new Date(log.startedAt).toLocaleTimeString()}
                           </span>
                         </div>
-                        <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-bold">
+                        <span className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded border font-bold ${
+                            log.status === 'success' ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                            : log.status === 'failed' ? 'bg-rose-950 text-rose-300 border-rose-800'
+                            : log.status === 'partial' ? 'bg-amber-950 text-amber-300 border-amber-800'
+                            : 'bg-cyan-950 text-cyan-300 border-cyan-800'
+                          }`}>
                           {log.status}
                         </span>
                       </div>
@@ -431,7 +465,7 @@ export const WorkflowsView: React.FC<WorkflowsViewProps> = ({
               <div className="space-y-2 pt-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-slate-400">
-                    Definición JSON compatible con n8n import API (/automation/n8n/workflows/):
+                    Archivo JSON real del workflow, listo para importar o actualizar en n8n:
                   </span>
                   <button
                     onClick={() => {

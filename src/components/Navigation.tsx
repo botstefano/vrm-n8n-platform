@@ -11,7 +11,6 @@ import {
   RefreshCw,
   Sparkles
 } from 'lucide-react';
-import { store } from '../services/store';
 
 export type NavTab =
   | 'dashboard'
@@ -24,13 +23,15 @@ export type NavTab =
   | 'audit';
 
 interface NavigationProps {
+  canWrite: boolean;
   currentTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   openCount: number;
   alertsCount: number;
   activeRole: string;
-  onSelectRole: (role: string) => void;
   onQuickRun: () => void;
+  userEmail: string;
+  onSignOut: () => void;
 }
 
 export const Navigation: React.FC<NavigationProps> = ({
@@ -39,15 +40,17 @@ export const Navigation: React.FC<NavigationProps> = ({
   openCount,
   alertsCount,
   activeRole,
-  onSelectRole,
-  onQuickRun
+  canWrite,
+  onQuickRun,
+  userEmail,
+  onSignOut
 }) => {
   const tabs: { id: NavTab; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: 'dashboard', label: 'Resumen Ejecutivo', icon: <LayoutDashboard className="w-4 h-4" /> },
     { id: 'vendors', label: 'Proveedores', icon: <Building2 className="w-4 h-4" /> },
     { id: 'findings', label: 'Hallazgos & CVEs', icon: <ShieldAlert className="w-4 h-4" />, badge: openCount },
     { id: 'workflows', label: 'Automatización n8n (11)', icon: <Cpu className="w-4 h-4" /> },
-    { id: 'assessments', label: 'Evaluaciones & Portal', icon: <FileCheck2 className="w-4 h-4" /> },
+    { id: 'assessments', label: 'Evaluaciones', icon: <FileCheck2 className="w-4 h-4" /> },
     { id: 'alerts', label: 'Centro de Alertas', icon: <Bell className="w-4 h-4" />, badge: alertsCount },
     { id: 'health', label: 'Salud de Jobs', icon: <Activity className="w-4 h-4" /> },
     { id: 'audit', label: 'Auditoría & Limpieza', icon: <History className="w-4 h-4" /> },
@@ -77,41 +80,21 @@ export const Navigation: React.FC<NavigationProps> = ({
           {/* Quick Actions & Role Switcher */}
           <div className="flex items-center gap-3">
             {/* Quick Run All Workflows */}
-            <button
+            {canWrite && <button
               onClick={onQuickRun}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 transition-all hover:scale-[1.02]"
               title="Disparar escaneo completo y recálculo de scorecards"
             >
               <RefreshCw className="w-3.5 h-3.5 animate-spin-hover" />
               <span>Ejecutar Escaneos</span>
-            </button>
+            </button>}
 
-            {/* Role Switcher */}
-            <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700 text-xs text-slate-300">
-              <span className="text-slate-500 text-[11px]">Rol:</span>
-              <select
-                value={activeRole}
-                onChange={(e) => onSelectRole(e.target.value)}
-                aria-label="Rol activo de usuario"
-                className="bg-transparent text-slate-200 font-medium focus:outline-none cursor-pointer"
-              >
-                <option value="admin" className="bg-slate-900 text-slate-100">Admin (CISO)</option>
-                <option value="risk_analyst" className="bg-slate-900 text-slate-100">Analista de Riesgo</option>
-                <option value="auditor" className="bg-slate-900 text-slate-100">Auditor</option>
-              </select>
+            <div className="hidden md:flex flex-col items-end text-right leading-tight max-w-[210px]">
+              <span className="text-xs font-semibold text-slate-200 truncate">{userEmail}</span>
+              <span className="text-[10px] text-cyan-300">Rol: {activeRole}</span>
             </div>
-
-            {/* Reset Store Button */}
-            <button
-              onClick={() => {
-                if (window.confirm('¿Reiniciar todos los datos a la configuración inicial del seed?')) {
-                  store.resetToDefaults();
-                }
-              }}
-              title="Restablecer datos originales de 02-seed.sql"
-              className="px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors"
-            >
-              Reset Seed
+            <button onClick={onSignOut} className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800">
+              Cerrar sesión
             </button>
           </div>
         </div>
