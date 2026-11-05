@@ -195,7 +195,7 @@
         "httpMethod": "POST",
         "path": "vrm-manual/wf-06",
         "authentication": "headerAuth",
-        "responseMode": "onReceived",
+        "responseMode": "responseNode",
         "options": {}
       },
       "id": "manual-webhook",
