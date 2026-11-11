@@ -69,7 +69,7 @@ export interface Assessment {
   started_at: string | null;
   completed_at: string | null;
   score?: number | null;
-  portal_token?: string;
+  portal_link?: string | null;
 }
 
 export interface VendorFinding {
@@ -136,7 +136,7 @@ export interface AlertNotification {
   source?: string;
   source_ref?: string;
   description?: string;
-  status: 'sent' | 'deduped';
+  status: 'sent' | 'deduped' | 'pending' | 'failed';
   slack_text?: string;
   email_subject?: string;
   email_html?: string;

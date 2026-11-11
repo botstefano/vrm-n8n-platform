@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Bell,
   Send,
@@ -20,9 +20,10 @@ import { store } from '../services/store';
 interface AlertsViewProps {
   alerts: AlertNotification[];
   vendors: Vendor[];
+  canWrite: boolean;
 }
 
-export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
+export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors, canWrite }) => {
   const [selectedAlert, setSelectedAlert] = useState<AlertNotification | null>(alerts[0] || null);
 
   // Manual Trigger Form
@@ -31,6 +32,20 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [source, setSource] = useState('manual_trigger');
+
+  useEffect(() => {
+    if (!alerts.length) {
+      setSelectedAlert(null);
+      return;
+    }
+    setSelectedAlert((current) => {
+      if (current) {
+        const latest = alerts.find((alert) => alert.id === current.id);
+        if (latest) return latest;
+      }
+      return alerts[0];
+    });
+  }, [alerts]);
 
   const handleSendTestAlert = (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,7 +75,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
             Centro de Despacho de Alertas Multicanal (WF-06)
           </h2>
           <p className="text-xs text-slate-400">
-            Deduplicación en Redis (ventana de 1h), enrutamiento por severidad hacia Slack (#secops) y SMTP a usuarios RBAC
+            Alertas persistidas en Supabase; el envío depende de la configuración activa de n8n, Slack y SMTP
           </p>
         </div>
       </div>
@@ -70,6 +85,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
         {/* Left: Trigger form + Feed */}
         <div className="lg:col-span-5 space-y-4">
           {/* Test Trigger Card */}
+          {canWrite && (
           <div className="p-4 rounded-xl bg-slate-900/70 border border-slate-800 space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
@@ -142,6 +158,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
               </button>
             </form>
           </div>
+          )}
 
           {/* Alerts Feed */}
           <div className="space-y-2">
@@ -173,9 +190,11 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
                           <SeverityBadge severity={al.severity} />
                           <span
                             className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-bold uppercase ${
-                              al.status === 'deduped'
+                              al.status === 'sent'
+                                ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                : al.status === 'deduped'
                                 ? 'bg-amber-950 text-amber-400 border border-amber-800'
-                                : 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                : 'bg-rose-950 text-rose-300 border border-rose-800'
                             }`}
                           >
                             {al.status}
@@ -211,7 +230,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
                     <div className="w-5 h-5 rounded bg-[#4A154B] flex items-center justify-center font-bold text-[10px] text-white">
                       #
                     </div>
-                    <span className="text-xs font-bold text-white">Canal de Slack: #secops-alerts</span>
+                    <span className="text-xs font-bold text-white">Previsualización del mensaje Slack</span>
                   </div>
                   <span className="text-[11px] font-mono text-slate-400">Incoming Webhook</span>
                 </div>
@@ -258,35 +277,38 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ alerts, vendors }) => {
                 </div>
               </div>
 
-              {/* Email SMTP Layout Preview (if route is slack+email) */}
-              <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                  <div className="flex items-center gap-2">
-                    <Mail className="w-4 h-4 text-cyan-400" />
-                    <span className="text-xs font-bold text-white">Plantilla de Correo SMTP (HTML)</span>
-                  </div>
-                  <span className="text-[11px] text-slate-400">
-                    Destinatarios: RBAC (Admin, Analista, Auditor)
-                  </span>
-                </div>
-
-                <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 space-y-3">
-                  <div className="border-b border-slate-800 pb-2 space-y-1 text-[11px]">
-                    <div><span className="text-slate-500">De:</span> alerts@vrm-platform.internal</div>
-                    <div><span className="text-slate-500">Asunto:</span> <span className="font-bold text-white">{selectedAlert.email_subject || selectedAlert.title}</span></div>
-                    <div><span className="text-slate-500">Para:</span> admin@vrm.local, analista@vrm.local</div>
+              {selectedAlert.route === 'slack+email' && (
+                <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <Mail className="w-4 h-4 text-cyan-400" />
+                      <span className="text-xs font-bold text-white">Previsualización del correo</span>
+                    </div>
+                    <span className="text-[11px] text-slate-400">Entrega mediante SMTP en n8n</span>
                   </div>
 
-                  <div
-                    className="prose prose-invert prose-xs max-w-none"
-                    dangerouslySetInnerHTML={{ __html: selectedAlert.email_html || '<p>Contenido no formateado</p>' }}
-                  />
+                  <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-300 space-y-3">
+                    <div className="border-b border-slate-800 pb-2 space-y-1 text-[11px]">
+                      <div><span className="text-slate-500">De:</span> Remitente configurado en n8n (<code>SMTP_FROM</code>)</div>
+                      <div><span className="text-slate-500">Asunto:</span> <span className="font-bold text-white">[{selectedAlert.severity.toUpperCase()}] VRM Security Alert: {selectedAlert.title}</span></div>
+                      <div><span className="text-slate-500">Para:</span> Usuarios activos con rol admin o risk_analyst en Supabase</div>
+                    </div>
+                    <div className="space-y-2">
+                      <h3 className="text-base font-bold text-white">Alerta de Seguridad VRM</h3>
+                      <p><strong>Severidad:</strong> <span className="uppercase">{selectedAlert.severity}</span></p>
+                      <p><strong>Título:</strong> {selectedAlert.title}</p>
+                      {selectedAlert.vendor_name && <p><strong>Proveedor:</strong> {selectedAlert.vendor_name}</p>}
+                      <p><strong>Fuente:</strong> {selectedAlert.source || 'n/a'}{selectedAlert.source_ref ? ` (${selectedAlert.source_ref})` : ''}</p>
+                      {selectedAlert.description && <p className="rounded bg-slate-900 p-3">{selectedAlert.description}</p>}
+                      <p className="text-[11px] text-slate-500">Mensaje enviado por el workflow WF-06 de n8n. El contenido final puede incluir el enlace de la plataforma.</p>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           ) : (
             <div className="p-12 text-center rounded-xl bg-slate-900/40 border border-slate-800 text-slate-500 text-xs">
-              Seleccione una alerta del historial para visualizar la previsualización en tiempo real de Slack y Correo Electrónico.
+              Seleccione una alerta para revisar el contenido preparado para los canales de notificación.
             </div>
           )}
         </div>

@@ -101,7 +101,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT u.email FROM users u\nJOIN user_roles ur ON ur.user_id = u.id\nJOIN roles r ON r.id = ur.role_id\nWHERE r.code IN ('admin','risk_analyst','auditor') AND u.is_active = true;",
+        "query": "SELECT COALESCE(array_agg(DISTINCT u.email) FILTER (WHERE u.email IS NOT NULL), ARRAY[]::text[]) AS emails,\n       COUNT(DISTINCT u.email)::int AS count\nFROM users u\nJOIN user_roles ur ON ur.user_id = u.id\nJOIN roles r ON r.id = ur.role_id\nWHERE r.code IN ('admin','risk_analyst','auditor') AND u.is_active = true;",
         "options": {}
       },
       "id": "pg-rcpt",
@@ -122,7 +122,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const list = [...new Set($input.all().map(i => i.json.email).filter(Boolean))];\nreturn [{ json: { bcc: list.join(','), count: list.length } }];"
+        "jsCode": "const row = $input.first()?.json || {};\nconst emails = Array.isArray(row.emails) ? row.emails.filter(Boolean) : [];\nreturn [{ json: { bcc: emails.join(','), count: Number(row.count || emails.length) } }];"
       },
       "id": "join",
       "name": "Join Recipients",
@@ -168,8 +168,8 @@
     },
     {
       "parameters": {
-        "fromEmail": "={{ $env.SMTP_FROM }}",
-        "toEmail": "={{ $env.SMTP_FROM }}",
+        "fromEmail": "={{ $vars.SMTP_FROM }}",
+        "toEmail": "={{ $vars.SMTP_FROM }}",
         "subject": "=VRM Digest Semanal — {{ $now.toFormat('yyyy-MM-dd') }}",
         "emailFormat": "html",
         "html": "={{ $('Build Digest HTML').first().json.html }}",
@@ -194,6 +194,73 @@
       "retryOnFail": true,
       "maxTries": 2,
       "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vrm-manual/wf-09",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "manual-webhook",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        520
+      ],
+      "webhookId": "vrm-manual-wf-09",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "httpHeaderAlerts",
+          "name": "VRM Alerts Webhook Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst recipients = $('Recipients').first().json || {};\nconst count = Number(recipients.count || 0);\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-09',\n  status: count > 0 ? 'success' : 'partial',\n  summary: count > 0 ? 'Digest semanal enviado a ' + count + ' destinatario(s).' : 'No hay destinatarios activos; no se envió el digest.',\n  details: { recipients: count }\n} }];"
+      },
+      "id": "manual-completion-code-wf-09",
+      "name": "Build Manual Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "manual-completion-http-wf-09",
+      "name": "Report Manual Completion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2380,
+        520
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
     }
   ],
   "connections": {
@@ -279,6 +346,46 @@
         [
           {
             "node": "Send Digest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Risk Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Digest": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
             "type": "main",
             "index": 0
           }

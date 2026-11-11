@@ -39,6 +39,9 @@ interface VendorsViewProps {
   selectedVendorId: string | null;
   onSelectVendor: (id: string | null) => void;
   onOpenFindingTab: () => void;
+  onRecalculateScorecard: (vendorId: string) => Promise<{ score: number; risk: string }>;
+  canWrite: boolean;
+  isAdmin: boolean;
 }
 
 export const VendorsView: React.FC<VendorsViewProps> = ({
@@ -49,7 +52,10 @@ export const VendorsView: React.FC<VendorsViewProps> = ({
   scoreHistory,
   selectedVendorId,
   onSelectVendor,
-  onOpenFindingTab
+  onOpenFindingTab,
+  onRecalculateScorecard,
+  canWrite,
+  isAdmin
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -137,13 +143,13 @@ export const VendorsView: React.FC<VendorsViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <button
+          {canWrite && <button
             onClick={() => setShowAddModal(true)}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white shadow-md shadow-cyan-950 transition-colors"
           >
             <Plus className="w-4 h-4" />
             <span>Nuevo Proveedor</span>
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -350,18 +356,22 @@ export const VendorsView: React.FC<VendorsViewProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  const res = store.recalculateScorecard(selectedVendor.id);
-                  alert(`Scorecard recalculado (WF-07): ${res.score} puntos · Nivel de Riesgo: ${res.risk.toUpperCase()}`);
+              {canWrite && <button
+                onClick={async () => {
+                  try {
+                    const result = await onRecalculateScorecard(selectedVendor.id);
+                    alert(`Scorecard recalculado: ${result.score} puntos · Nivel de Riesgo: ${result.risk.toUpperCase()}`);
+                  } catch (error) {
+                    alert(error instanceof Error ? error.message : 'No se pudo recalcular el scorecard.');
+                  }
                 }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 transition-colors"
               >
                 <TrendingUp className="w-3.5 h-3.5" />
                 <span>Recalcular Score</span>
-              </button>
+              </button>}
 
-              <button
+              {isAdmin && <button
                 onClick={() => {
                   if (confirm(`¿Eliminar proveedor ${selectedVendor.legal_name}? Esta acción purgará también sus hallazgos y tecnologías asociadas.`)) {
                     store.deleteVendor(selectedVendor.id);
@@ -372,7 +382,7 @@ export const VendorsView: React.FC<VendorsViewProps> = ({
                 title="Eliminar Proveedor"
               >
                 <Trash2 className="w-4 h-4" />
-              </button>
+              </button>}
 
               <button
                 onClick={() => onSelectVendor(null)}
@@ -455,19 +465,20 @@ export const VendorsView: React.FC<VendorsViewProps> = ({
                         <span className="font-semibold text-slate-200">{t.product_name}</span>
                         <div className="font-mono text-[11px] text-cyan-400 mt-0.5">{t.cpe_match}</div>
                       </div>
-                      <button
+                      {canWrite && <button
                         onClick={() => store.deleteTechnology(t.id)}
                         className="text-slate-500 hover:text-rose-400 p-1"
                         title="Eliminar Tecnología"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      </button>}
                     </div>
                   ))
               )}
             </div>
 
             {/* Add Tech Form */}
+            {canWrite && (
             <form onSubmit={handleAddTechnology} className="pt-2 flex flex-wrap gap-2 items-center">
               <input
                 type="text"
@@ -490,6 +501,7 @@ export const VendorsView: React.FC<VendorsViewProps> = ({
                 + Añadir CPE
               </button>
             </form>
+            )}
           </div>
 
           {/* Section: Linked Findings */}

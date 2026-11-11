@@ -25,9 +25,10 @@ interface FindingsViewProps {
   findings: VendorFinding[];
   vendors: Vendor[];
   onSelectVendor: (vendorId: string) => void;
+  canWrite: boolean;
 }
 
-export const FindingsView: React.FC<FindingsViewProps> = ({ findings, vendors, onSelectVendor }) => {
+export const FindingsView: React.FC<FindingsViewProps> = ({ findings, vendors, onSelectVendor, canWrite }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
@@ -128,13 +129,15 @@ export const FindingsView: React.FC<FindingsViewProps> = ({ findings, vendors, o
           </p>
         </div>
 
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white shadow-md shadow-cyan-950 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Registrar Hallazgo Manual</span>
-        </button>
+        {canWrite && (
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white shadow-md shadow-cyan-950 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Registrar Hallazgo Manual</span>
+          </button>
+        )}
       </div>
 
       {/* Filters and Search */}
@@ -286,8 +289,8 @@ export const FindingsView: React.FC<FindingsViewProps> = ({ findings, vendors, o
                       </div>
                     )}
 
-                    {/* Transition buttons */}
-                    <div className="flex items-center gap-1.5 pt-1">
+                    {canWrite && (
+                      <div className="flex items-center gap-1.5 pt-1">
                       {finding.status === 'open' && (
                         <button
                           onClick={() => store.updateFindingStatus(finding.id, 'in_progress')}
@@ -315,7 +318,8 @@ export const FindingsView: React.FC<FindingsViewProps> = ({ findings, vendors, o
                           <span>Cerrar</span>
                         </button>
                       )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

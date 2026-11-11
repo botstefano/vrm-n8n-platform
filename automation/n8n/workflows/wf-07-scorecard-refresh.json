@@ -40,21 +40,13 @@
           "id": "postgresVrm",
           "name": "Postgres VRM"
         }
-      }
+      },
+      "alwaysOutputData": true
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.VRM_BACKEND_URL }}/api/v1/scorecard/recalc/{{ $json.id }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-Internal-Token",
-              "value": "={{ $env.INTERNAL_API_TOKEN }}"
-            }
-          ]
-        },
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/scorecard/recalc/{{ $json.id }}",
         "options": {
           "timeout": 30000,
           "batching": {
@@ -69,7 +61,9 @@
               "neverError": true
             }
           }
-        }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "recalc",
       "name": "Recalc Scorecard",
@@ -82,7 +76,13 @@
       "retryOnFail": true,
       "maxTries": 2,
       "waitBetweenTries": 3000,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
     },
     {
       "parameters": {
@@ -157,23 +157,16 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.N8N_BASE_URL }}/webhook/vrm-alerts",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-Alert-Token",
-              "value": "={{ $env.ALERTS_WEBHOOK_TOKEN }}"
-            }
-          ]
-        },
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/alert-request",
         "sendBody": true,
         "contentType": "json",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ type: 'scorecard_refresh', severity: 'medium', title: 'Scorecard: ' + $('Aggregate').first().json.fail + ' proveedores fallaron al recalcular', source: 'n8n', source_ref: 'scorecard_refresh', fingerprint: 'scorecard:partial' }) }}",
         "options": {
-          "timeout": 10000
-        }
+          "timeout": 40000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "id": "alert",
       "name": "Send Alert",
@@ -186,7 +179,126 @@
       "retryOnFail": true,
       "maxTries": 2,
       "waitBetweenTries": 2000,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vrm-manual/wf-07",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "manual-webhook",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        520
+      ],
+      "webhookId": "vrm-manual-wf-07",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "httpHeaderAlerts",
+          "name": "VRM Alerts Webhook Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const manual = $('Manual Trigger');\nif (!manual.isExecuted) return [];\nconst trigger = manual.first().json || {};\nconst request = trigger.body || trigger;\nif (!request.request_id) return [];\nconst aggregate = $('Aggregate').isExecuted ? ($('Aggregate').first().json || {}) : ($('Build Empty Summary').first().json || {});\nconst total = Number(aggregate.total || 0);\nconst ok = Number(aggregate.ok || 0);\nconst fail = Number(aggregate.fail || 0);\nconst status = fail === 0 ? 'success' : ok === 0 ? 'failed' : 'partial';\nreturn [{ json: {\n  request_id: request.request_id,\n  workflow_code: 'wf-07',\n  status,\n  summary: 'Scorecards: ' + ok + '/' + total + ' recalculados; ' + fail + ' error(es).',\n  details: { total, ok, fail }\n} }];"
+      },
+      "id": "manual-completion-code-wf-07",
+      "name": "Build Manual Completion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $vars.VRM_BACKEND_URL }}/api/v1/webhooks/n8n/workflow-completed",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "id": "manual-completion-http-wf-07",
+      "name": "Report Manual Completion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2380,
+        520
+      ],
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "vrmBackendCallbackAuth",
+          "name": "VRM Backend Callback Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-active-vendors",
+              "leftValue": "={{ Boolean($json.id) }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-active-vendors",
+      "name": "IF Has Active Vendors",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        620,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: {\n  job_type: 'scorecard_refresh_all',\n  interval_min: 60,\n  status: 'ok',\n  last_run: new Date().toISOString(),\n  total: 0,\n  ok: 0,\n  fail: 0,\n  meta: { total: 0, ok: 0, fail: 0 }\n} }];"
+      },
+      "id": "build-empty-summary-wf-07",
+      "name": "Build Empty Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        560
+      ]
     }
   ],
   "connections": {
@@ -205,7 +317,7 @@
       "main": [
         [
           {
-            "node": "Recalc Scorecard",
+            "node": "IF Has Active Vendors",
             "type": "main",
             "index": 0
           }
@@ -230,13 +342,7 @@
             "node": "Log Run",
             "type": "main",
             "index": 0
-          }
-        ]
-      ]
-    },
-    "Log Run": {
-      "main": [
-        [
+          },
           {
             "node": "IF Failures",
             "type": "main",
@@ -250,6 +356,80 @@
         [
           {
             "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Active Vendors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Alert": {
+      "main": [
+        [
+          {
+            "node": "Build Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Manual Completion": {
+      "main": [
+        [
+          {
+            "node": "Report Manual Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Active Vendors": {
+      "main": [
+        [
+          {
+            "node": "Recalc Scorecard",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Empty Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Empty Summary": {
+      "main": [
+        [
+          {
+            "node": "Log Run",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Manual Completion",
             "type": "main",
             "index": 0
           }
